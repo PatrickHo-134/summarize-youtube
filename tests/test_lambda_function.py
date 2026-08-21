@@ -1,114 +1,101 @@
 import os
 import json
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-# 1. Set dummy environment variables BEFORE importing your script.
-# This prevents the module-level OpenAI client from crashing during tests.
-os.environ["OPENAI_API_KEY"] = "dummy_key"
-os.environ["OPENAI_ORG_ID"] = "dummy_org"
-os.environ["OPENAI_PROJECT_ID"] = "dummy_proj"
+# 1. Set environment variables BEFORE importing the lambda function.
+# This ensures boto3 doesn't look for real AWS credentials during tests.
+os.environ["AWS_DEFAULT_REGION"] = "ap-southeast-2" # Match your Sydney region
+os.environ["DYNAMODB_TABLE"] = "youtube-summaries"
+os.environ["SSM_PARAM_NAME"] = "/dummy/path"
 
-# Now safely import the functions from your script
-from src.lambda_function import format_prompt_v2, get_transcript, summarise, lambda_handler
-from youtube_transcript_api._errors import TranscriptsDisabled
+# 2. Mock the boto3 client creation to prevent AWS connection attempts on load
+with patch('boto3.client'), patch('boto3.resource'):
+    from src.lambda_function import (
+        extract_and_validate_video_id,
+        lambda_handler,
+        get_transcript
+    )
+    from youtube_transcript_api._errors import TranscriptsDisabled
 
-# --- TEST 1: Prompt Formatting ---
-def test_format_prompt_v2():
-    transcript = "This is a test transcript."
-    prompt = format_prompt_v2(transcript)
-    assert "This is a test transcript." in prompt
-    assert "logically by theme or topic" in prompt
+# --- TEST 1: URL Validation (Regex) ---
+def test_extract_and_validate_video_id():
+    # Valid URLs
+    assert extract_and_validate_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert extract_and_validate_video_id("https://youtu.be/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert extract_and_validate_video_id("https://youtube.com/embed/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
 
-# --- TEST 2: YouTube API Mocking ---
-@patch('src.lambda_function.YouTubeTranscriptApi')
-def test_get_transcript_success(mock_ytt):
-    # Setup the fake return data that matches YouTubeTranscriptApi's structure
-    fake_transcript = [
-        {'text': 'Hello world.'},
-        {'text': 'Welcome to the video.'}
-    ]
+    # Invalid URLs
+    assert extract_and_validate_video_id("https://google.com") is None
+    assert extract_and_validate_video_id("not-a-url") is None
+    assert extract_and_validate_video_id("") is None
 
-    # Configure the mock for the class method `get_transcript`
-    mock_ytt.get_transcript.return_value = fake_transcript
-
-    # Run the function
-    content, error = get_transcript("https://youtube.com/watch?v=12345")
-
-    # Assertions
-    assert content == "Hello world. Welcome to the video."
-    assert error is None
-    mock_ytt.get_transcript.assert_called_once_with("12345")
-
-@patch('src.lambda_function.YouTubeTranscriptApi')
-def test_get_transcript_disabled(mock_ytt):
-    # Simulate a disabled transcript error
-    mock_ytt.get_transcript.side_effect = TranscriptsDisabled("12345")
-
-    content, error = get_transcript("https://youtube.com/watch?v=12345")
-
-    # Assertions
-    assert content is None
-    assert error is not None
-    assert "12345" in error
-
-# --- TEST 3: OpenAI API Mocking ---
-@patch('src.lambda_function.client.chat.completions.create')
-def test_summarise(mock_openai_create):
-    # Setup a fake OpenAI response structure
-    mock_response = MagicMock()
-    mock_response.choices[0].message.content = "- Fake Summary Point 1\n- Fake Summary Point 2"
-    mock_openai_create.return_value = mock_response
-
-    result = summarise("Test transcript content")
-
-    # Assertions
-    assert "- Fake Summary Point 1" in result
-    mock_openai_create.assert_called_once()
-
-# --- TEST 4: API Gateway Lambda Handler Tests ---
-@patch('src.lambda_function.get_transcript')
-@patch('src.lambda_function.summarise')
-def test_lambda_handler_success(mock_summarise, mock_get_transcript):
-    # Mock the internal helper functions
-    mock_get_transcript.return_value = ("Fake full transcript", None)
-    mock_summarise.return_value = "Fake final summary"
-
-    # Simulate an incoming API Gateway request with a valid URL
-    event = {
-        "body": json.dumps({"url": "https://youtube.com/watch?v=abcde"})
-    }
-
+def test_lambda_handler_invalid_url():
+    event = {"body": json.dumps({"url": "https://google.com"})}
     response = lambda_handler(event, {})
 
-    # Assertions
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "Invalid or missing YouTube URL" in body["error"]
+
+# --- TEST 2: DynamoDB Cache Hit (Bypasses LLM and Transcript) ---
+@patch('src.lambda_function.check_cache')
+def test_lambda_handler_cache_hit(mock_check_cache):
+    # Simulate finding the summary in DynamoDB
+    mock_check_cache.return_value = "- Cached Point 1\n- Cached Point 2"
+
+    event = {"body": json.dumps({"url": "https://youtube.com/watch?v=12345678901"})}
+    response = lambda_handler(event, {})
+
     assert response["statusCode"] == 200
     body = json.loads(response["body"])
-    assert body["summary"] == "Fake final summary"
 
-def test_lambda_handler_missing_url():
-    # Simulate a bad request (missing 'url' in body)
-    event = {"body": "{}"}
+    assert body["summary"] == "- Cached Point 1\n- Cached Point 2"
+    assert body["source"] == "cache" # Validates it came from DB
+    mock_check_cache.assert_called_once_with("12345678901")
 
-    response = lambda_handler(event, {})
-
-    # Assertions
-    assert response["statusCode"] == 400
-    body = json.loads(response["body"])
-    assert body["error"] == "No URL provided."
-
+# --- TEST 3: Full Flow (Cache Miss, Fetch Transcript, Call LLM, Save Cache) ---
+@patch('src.lambda_function.check_cache')
 @patch('src.lambda_function.get_transcript')
-def test_lambda_handler_transcript_error(mock_get_transcript):
-    # Simulate a failure inside the transcript fetching step
-    mock_get_transcript.return_value = (None, "Transcripts are disabled for this video.")
+@patch('src.lambda_function.summarise')
+@patch('src.lambda_function.save_to_cache')
+def test_lambda_handler_cache_miss_success(mock_save, mock_summarise, mock_get_transcript, mock_check_cache):
+    # Simulate DB miss
+    mock_check_cache.return_value = None
 
-    event = {
-        "body": json.dumps({"url": "https://youtube.com/watch?v=abcde"})
-    }
+    # Simulate successful transcript fetch
+    mock_get_transcript.return_value = ("Full transcript content", None)
 
+    # Simulate successful OpenAI call
+    mock_summarise.return_value = ("New AI summary", None)
+
+    event = {"body": json.dumps({"url": "https://youtube.com/watch?v=12345678901"})}
     response = lambda_handler(event, {})
 
-    # Assertions
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+
+    assert body["summary"] == "New AI summary"
+    assert body["source"] == "llm"
+
+    # Verify the sequence of function calls
+    mock_check_cache.assert_called_once_with("12345678901")
+    mock_get_transcript.assert_called_once_with("12345678901")
+    mock_summarise.assert_called_once_with("Full transcript content")
+    mock_save.assert_called_once_with("12345678901", "New AI summary")
+
+# --- TEST 4: Transcript Failure (e.g., Subtitles Disabled) ---
+@patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_lambda_handler_transcript_disabled(mock_ytt, mock_check_cache):
+    mock_check_cache.return_value = None
+
+    # Simulate the YouTube API throwing a TranscriptsDisabled error
+    mock_ytt.get_transcript.side_effect = TranscriptsDisabled("12345678901")
+
+    event = {"body": json.dumps({"url": "https://youtube.com/watch?v=12345678901"})}
+    response = lambda_handler(event, {})
+
     assert response["statusCode"] == 400
     body = json.loads(response["body"])
-    assert body["error"] == "Transcripts are disabled for this video."
+    assert "Could not retrieve a transcript" in body["error"]
