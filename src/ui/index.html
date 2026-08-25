@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <title>YouTube Summarizer</title>
+     <style>
+          body {
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+               max-width: 750px;
+               margin: 50px auto;
+               padding: 20px;
+               color: #333;
+               line-height: 1.6;
+          }
+
+          h1 {
+               font-size: 1.8rem;
+               margin-bottom: 20px;
+          }
+
+          .input-group {
+               display: flex;
+               gap: 10px;
+               margin-bottom: 20px;
+          }
+
+          input[type="text"] {
+               flex: 1;
+               padding: 12px;
+               font-size: 15px;
+               border: 1px solid #ccc;
+               border-radius: 6px;
+               outline: none;
+          }
+
+          input[type="text"]:focus {
+               border-color: #0066cc;
+          }
+
+          button {
+               padding: 12px 20px;
+               font-size: 15px;
+               font-weight: 600;
+               background-color: #0066cc;
+               color: white;
+               border: none;
+               border-radius: 6px;
+               cursor: pointer;
+               transition: background 0.2s;
+          }
+
+          button:hover {
+               background-color: #0052a3;
+          }
+
+          button:disabled {
+               background-color: #a0c4e8;
+               cursor: not-allowed;
+          }
+
+          .spinner {
+               display: none;
+               margin: 20px 0;
+               font-style: italic;
+               color: #666;
+          }
+
+          #result {
+               display: none;
+               margin-top: 25px;
+               padding: 20px;
+               background-color: #f8f9fa;
+               border: 1px solid #e9ecef;
+               border-radius: 8px;
+               white-space: pre-wrap;
+          }
+
+          .error {
+               color: #d9534f;
+               background-color: #fdf7f7;
+               border-color: #f5c6cb;
+          }
+     </style>
+</head>
+
+<body>
+
+     <h1>YouTube Video Summarizer</h1>
+
+     <div class="input-group">
+          <input type="text" id="urlInput"
+               placeholder="Paste YouTube URL here (e.g. https://www.youtube.com/watch?v=...)">
+          <button id="submitBtn" onclick="summarizeVideo()">Summarize</button>
+     </div>
+
+     <div id="spinner" class="spinner">Fetching transcript and generating summary with OpenAI...</div>
+     <div id="result"></div>
+
+     <script>
+          const API_ENDPOINT = 'https://etx5b18bqf.execute-api.ap-southeast-2.amazonaws.com/prod/summarize';
+
+          async function summarizeVideo() {
+               const urlInput = document.getElementById('urlInput');
+               const submitBtn = document.getElementById('submitBtn');
+               const spinner = document.getElementById('spinner');
+               const resultDiv = document.getElementById('result');
+
+               const youtubeUrl = urlInput.value.trim();
+
+               if (!youtubeUrl) {
+                    alert("Please enter a YouTube URL.");
+                    return;
+               }
+
+               // Set UI loading state
+               submitBtn.disabled = true;
+               spinner.style.display = 'block';
+               resultDiv.style.display = 'none';
+               resultDiv.classList.remove('error');
+
+               try {
+                    const response = await fetch(API_ENDPOINT, {
+                         method: 'POST',
+                         headers: {
+                              'Content-Type': 'application/json'
+                         },
+                         body: JSON.stringify({ url: youtubeUrl })
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                         // Displays summary returned from Lambda (either from DynamoDB cache or OpenAI)
+                         resultDiv.textContent = data.summary;
+                         console.log(`Result source: ${data.source}`);
+                    } else {
+                         // Handles 400 (invalid URL) or 502 (LLM error) responses
+                         resultDiv.classList.add('error');
+                         resultDiv.textContent = `Error: ${data.error || 'Failed to summarize video.'}`;
+                    }
+               } catch (err) {
+                    resultDiv.classList.add('error');
+                    resultDiv.textContent = 'Network Error: Unable to reach the API Gateway endpoint.';
+                    console.error('Fetch Error:', err);
+               } finally {
+                    // Reset UI state
+                    submitBtn.disabled = false;
+                    spinner.style.display = 'none';
+                    resultDiv.style.display = 'block';
+               }
+          }
+     </script>
+</body>
+
+</html>
