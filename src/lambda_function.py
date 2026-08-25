@@ -56,7 +56,16 @@ def format_prompt_v2(content):
 
 def get_transcript(video_id):
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        # Instantiate the API object
+        ytt_api = YouTubeTranscriptApi()
+
+        # Fetch the transcript object
+        fetched_transcript = ytt_api.fetch(video_id)
+
+        # Convert back to the list of dictionaries
+        transcript_list = fetched_transcript.to_raw_data()
+
+        # Combine text segments into a single string
         full_content = " ".join(snippet['text'] for snippet in transcript_list)
         return full_content, None
     except (TranscriptsDisabled, VideoUnavailable, NoTranscriptFound) as e:
