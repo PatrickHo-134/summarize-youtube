@@ -5,6 +5,7 @@ import boto3
 from botocore.exceptions import ClientError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
+from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
 
 # Initialize AWS clients
@@ -56,8 +57,18 @@ def format_prompt_v2(content):
 
 def get_transcript(video_id):
     try:
-        # Instantiate the API object
-        ytt_api = YouTubeTranscriptApi()
+        # Check for the Proxy URL environment variable
+        proxy_url = os.environ.get("PROXY_URL")
+
+        # Instantiate the API object, using the proxy if the variable exists
+        if proxy_url:
+            proxy_config = GenericProxyConfig(
+                http_url=proxy_url,
+                https_url=proxy_url
+            )
+            ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+        else:
+            ytt_api = YouTubeTranscriptApi()
 
         # Fetch the transcript object
         fetched_transcript = ytt_api.fetch(video_id)
