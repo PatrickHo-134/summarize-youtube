@@ -1,4 +1,5 @@
 import os
+import logging
 import json
 import re
 import boto3
@@ -7,6 +8,10 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
 from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
+
+# Initialize the logger at the global level
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
@@ -134,46 +139,61 @@ def summarise(content):
 # AWS Lambda Entry Point
 def lambda_handler(event, context):
     try:
+        logger.info(f"Incoming event body: {event.get('body')}")
+
         body = json.loads(event.get('body', '{}'))
         youtube_url = body.get('url')
 
-        # 1. Validate URL
+        # Validate URL
         video_id = extract_and_validate_video_id(youtube_url)
         if not video_id:
+            logger.warning(f"URL validation failed for input: {youtube_url}")
             return {
                 'statusCode': 400,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': 'Invalid or missing YouTube URL.'})
             }
 
-        # 2. Check Database Cache
+        logger.info(f"Successfully extracted Video ID: {video_id}")
+
+        # Log the cache check
+        logger.info("Checking DynamoDB cache...")
         cached_summary = check_cache(video_id)
         if cached_summary:
+            logger.info("Cache hit. Returning cached summary.")
             return {
                 'statusCode': 200,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'summary': cached_summary, 'source': 'cache'})
             }
 
-        # 3. Fetch Transcript
+        # Log the transcript fetch (Common failure point)
+        proxy_configured = bool(os.environ.get('PROXY_URL'))
+        logger.info(f"Cache miss. Fetching transcript... (Proxy Configured: {proxy_configured})")
+
         transcript, error = get_transcript(video_id)
         if error:
+            logger.error(f"Transcript fetch failed: {error}")
             return {
                 'statusCode': 400,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': error})
             }
 
-        # 4. Summarize via LLM
+        logger.info(f"Transcript fetched successfully. Length: {len(transcript)} characters.")
+
+        # Log the LLM execution (Another common timeout point)
+        logger.info("Sending transcript to OpenAI...")
         summary, llm_error = summarise(transcript)
         if llm_error:
+            logger.error(f"OpenAI API failed: {llm_error}")
             return {
                 'statusCode': 502,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': llm_error})
             }
 
-        # 5. Save to Cache
+        logger.info("Successfully generated summary. Saving to cache.")
         save_to_cache(video_id, summary)
 
         return {
@@ -183,8 +203,10 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
+        # Log unexpected crashes with full stack traces
+        logger.exception("An unexpected error occurred during Lambda execution.")
         return {
             'statusCode': 500,
             'headers': {'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'error': str(e)})
+            'body': json.dumps({'error': "Internal server error."})
         }
