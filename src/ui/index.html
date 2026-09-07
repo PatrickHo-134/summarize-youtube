@@ -4,6 +4,7 @@
 <head>
      <meta charset="UTF-8">
      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
      <title>YouTube Summarizer</title>
      <style>
           body {
@@ -75,6 +76,41 @@
                border: 1px solid #e9ecef;
                border-radius: 8px;
                white-space: pre-wrap;
+               line-height: 1.7;
+          }
+
+          #result ul {
+               padding-left: 20px;
+          }
+
+          #result li {
+               margin-bottom: 8px;
+          }
+
+          #result strong {
+               color: #0052a3;
+          }
+
+          .action-container {
+               display: none;
+               gap: 10px;
+               margin-top: 15px;
+          }
+
+          .btn-secondary {
+               background-color: #28a745;
+          }
+
+          .btn-secondary:hover {
+               background-color: #218838;
+          }
+
+          .btn-retry {
+               background-color: #d9534f;
+          }
+
+          .btn-retry:hover {
+               background-color: #c9302c;
           }
 
           .error {
@@ -95,61 +131,74 @@
           <button id="submitBtn" onclick="summarizeVideo()">Summarize</button>
      </div>
 
-     <div id="spinner" class="spinner">Fetching transcript and generating summary with OpenAI...</div>
+     <div id="spinner" class="spinner">Fetching transcript and generating summary...</div>
      <div id="result"></div>
 
+     <div id="actionContainer" class="action-container">
+          <button id="emailBtn" class="btn-secondary" onclick="sendEmail()">✉️ Email Summary</button>
+          <button id="retryBtn" class="btn-retry" onclick="summarizeVideo()">🔄 Retry Request</button>
+     </div>
+
      <script>
-          const API_ENDPOINT = 'https://etx5b18bqf.execute-api.ap-southeast-2.amazonaws.com/prod/summarize';
+          const API_ENDPOINT = 'https://etx5b18bqf.execute-api.ap-southeast-2.amazonaws.com/prod/summarize'; //[cite: 1]
+          let currentSummaryText = "";
 
           async function summarizeVideo() {
                const urlInput = document.getElementById('urlInput');
                const submitBtn = document.getElementById('submitBtn');
                const spinner = document.getElementById('spinner');
                const resultDiv = document.getElementById('result');
+               const actionContainer = document.getElementById('actionContainer');
+               const emailBtn = document.getElementById('emailBtn');
+               const retryBtn = document.getElementById('retryBtn');
 
                const youtubeUrl = urlInput.value.trim();
+               if (!youtubeUrl) return alert("Please enter a YouTube URL.");
 
-               if (!youtubeUrl) {
-                    alert("Please enter a YouTube URL.");
-                    return;
-               }
-
-               // Set UI loading state
                submitBtn.disabled = true;
                spinner.style.display = 'block';
                resultDiv.style.display = 'none';
+               actionContainer.style.display = 'none';
                resultDiv.classList.remove('error');
 
                try {
                     const response = await fetch(API_ENDPOINT, {
                          method: 'POST',
-                         headers: {
-                              'Content-Type': 'application/json'
-                         },
+                         headers: { 'Content-Type': 'application/json' },
                          body: JSON.stringify({ url: youtubeUrl })
                     });
 
                     const data = await response.json();
 
                     if (response.ok) {
-                         // Displays summary returned from Lambda (either from DynamoDB cache or OpenAI)
-                         resultDiv.textContent = data.summary;
-                         console.log(`Result source: ${data.source}`);
+                         currentSummaryText = data.summary;
+                         resultDiv.innerHTML = marked.parse(data.summary); // Renders Markdown
+
+                         actionContainer.style.display = 'flex';
+                         emailBtn.style.display = 'block';
+                         retryBtn.style.display = 'none';
                     } else {
-                         // Handles 400 (invalid URL) or 502 (LLM error) responses
-                         resultDiv.classList.add('error');
-                         resultDiv.textContent = `Error: ${data.error || 'Failed to summarize video.'}`;
+                         throw new Error(data.error || 'Failed to summarize video.');
                     }
                } catch (err) {
                     resultDiv.classList.add('error');
-                    resultDiv.textContent = 'Network Error: Unable to reach the API Gateway endpoint.';
-                    console.error('Fetch Error:', err);
+                    resultDiv.textContent = `Error: ${err.message}`;
+
+                    actionContainer.style.display = 'flex';
+                    emailBtn.style.display = 'none';
+                    retryBtn.style.display = 'block'; // Show retry on failure
                } finally {
-                    // Reset UI state
                     submitBtn.disabled = false;
                     spinner.style.display = 'none';
                     resultDiv.style.display = 'block';
                }
+          }
+
+          function sendEmail() {
+               // Client-side email triggering (can be replaced with an API call later)
+               const subject = encodeURIComponent("YouTube Video Summary");
+               const body = encodeURIComponent("Here is the summary of the video:\n\n" + currentSummaryText);
+               window.location.href = `mailto:?subject=${subject}&body=${body}`;
           }
      </script>
 </body>
