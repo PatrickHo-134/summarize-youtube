@@ -25,8 +25,8 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-package
-deployment.zip
+backend/package/
+backend/deployment.zip
 
 # PyInstaller
 #   Usually these files are written by a python script from a template
@@ -154,7 +154,7 @@ activemq-data/
 .envrc
 .venv
 env/
-venv/
+backend/venv/
 ENV/
 env.bak/
 venv.bak/
@@ -218,3 +218,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Others
+.DS_Store
