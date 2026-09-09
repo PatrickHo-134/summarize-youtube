@@ -1,6 +1,6 @@
 # Serverless YouTube Summarizer (AWS Cloud-Native)
 
-An end-to-end, serverless application that takes a YouTube URL, extracts its transcript, generates a structured summary using OpenAI's GPT-4o-mini, and caches the results in DynamoDB. The frontend is served globally via CloudFront from a private S3 bucket.
+An end-to-end, serverless web application that accepts a YouTube URL, extracts its transcript, generates a structured summary using OpenAI's GPT-4o-mini, and caches the results in DynamoDB. The application features a modern React/TypeScript frontend distributed globally via CloudFront from a private S3 bucket.
 
 ---
 
@@ -10,7 +10,7 @@ An end-to-end, serverless application that takes a YouTube URL, extracts its tra
 [ User Browser ]
        │
        ▼
-[ CloudFront CDN ] ──► [ S3 Bucket (Static UI: index.html, app.js) ]
+[ CloudFront CDN ] ──► [ S3 Bucket (Vite + React + TS Static Build) ]
        │
        ▼ (REST API Call)
 [ AWS API Gateway ] (/summarize)
@@ -24,34 +24,47 @@ An end-to-end, serverless application that takes a YouTube URL, extracts its tra
 ```
 
 ### Tech Stack
-- **Frontend:** Static HTML5 / Modern JavaScript (`app.js`) hosted on S3 & distributed via CloudFront with OAC (Origin Access Control).
+
+- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
+- **Hosting & Distribution:** Amazon S3 (Private Bucket) + CloudFront CDN with Origin Access Control (OAC).
 - **API Gateway:** REST API (`POST /summarize`) with CORS enabled.
 - **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
-- **Database / Caching:** AWS DynamoDB (`youtube-summaries` table).
-- **Secrets Management:** AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
-- **External Integrations:**
-  - `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig` support.
-  - OpenAI API (`gpt-4o-mini`).
-  - Residential Proxy Gateway (e.g., DataImpulse).
+- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` table) and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
+- **External Integrations:** `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig`, OpenAI API (`gpt-4o-mini`), DataImpulse Residential Proxy.
 
 ---
 
 ## ✨ Features
 
-- **Cost-Optimized Caching:** Checks DynamoDB before making LLM or transcript calls, preventing duplicate API costs for previously summarized videos.
-- **YouTube Cloud IP Bypass:** Integrates residential proxy routing to circumvent YouTube's anti-bot restrictions on AWS datacenter IP ranges.
-- **Cross-Platform Lambda Packaging:** Uses Linux platform targeting (`manylinux2014_x86_64`) to eliminate native binary compatibility issues (e.g., `pydantic-core`).
-- **Comprehensive Logging & Error Handling:** Full CloudWatch tracing across all external integration points (SSM, DynamoDB, Proxy, OpenAI).
+- **Beautiful Markdown Rendering:** Transforms LLM bullet points and headers into formatted HTML using `react-markdown`.
+- **Cache Hit Indicator:** Real-time visual badge highlighting whether a summary was newly **Generated** via OpenAI or loaded instantly from the **Cached** DynamoDB store.
+- **Cost-Optimized Caching:** Prevents duplicate LLM and proxy API costs by verifying cached video IDs in DynamoDB prior to execution.
+- **Error & Retry Handling:** Displays inline error states and provides a **Retry Request** trigger when video transcripts fail or API limits are exceeded.
+- **Email Sharing Action:** Allows users to export video takeaways directly to their default mail client via a single click.
+- **YouTube Cloud IP Bypass:** Bypasses AWS datacenter IP restrictions imposed by YouTube using residential proxy routing.
 
 ---
 
 ## 📁 Repository Structure
 
 ```
-.
-├── src/
-│   └── lambda_function.py    # Main AWS Lambda handler & business logic
-├── build.sh                  # Automated cross-platform deployment packaging script
+SUMMARIZE-YOUTUBE/
+├── backend/                  # Isolated Python Lambda Service
+│   ├── src/                  # Lambda handler & business logic
+│   ├── tests/                # Unit & integration tests
+│   ├── build.sh              # Cross-platform Linux packaging script
+│   ├── requirements.txt      # Production dependencies
+│   └── requirements-dev.txt  # Development dependencies
+├── frontend/                 # Vite + React + TypeScript App
+│   ├── src/
+│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx
+│   │   ├── hooks/            # Custom fetch & state hook (useSummarize.ts)
+│   │   ├── types/            # TypeScript interface declarations
+│   │   ├── App.tsx           # Main application layout
+│   │   └── main.tsx
+│   ├── package.json
+│   └── vite.config.ts
+├── deploy-frontend.sh        # S3 Sync & CloudFront Invalidation automation
 ├── CONTEXT.md                # Infrastructure state and troubleshooting history
 └── README.md                 # Project documentation
 ```
@@ -60,70 +73,75 @@ An end-to-end, serverless application that takes a YouTube URL, extracts its tra
 
 ## ⚙️ Environment Variables & Configuration
 
-### Lambda Environment Variables
-| Variable Key | Description | Default / Example Value |
-| :--- | :--- | :--- |
-| `PROXY_URL` | Residential proxy gateway URL for YouTube requests | `http://USER:PASS@gw.dataimpulse.com:823` |
-| `DYNAMODB_TABLE` | DynamoDB table name for cached summaries | `youtube-summaries` |
-| `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key | `/youtube-summarizer/openai-api-key` |
+### Backend Lambda Environment Variables
 
-### SSM Parameter Store
-- **Name:** `/youtube-summarizer/openai-api-key`
-- **Type:** `SecureString`
-- **Value:** `sk-proj-...`
+| Variable Key     | Description                                        | Default / Example Value                       |
+| :--------------- | :------------------------------------------------- | :-------------------------------------------- |
+| `PROXY_URL`      | Residential proxy gateway URL for YouTube requests | `http://USER:PASS@gw.dataimpulse.com:823`     |
+| `DYNAMODB_TABLE` | DynamoDB table name for cached summaries           | `youtube-summaries`                           |
+| `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key        | `/youtube-summarizer/openai-api-key` |
 
 ---
 
-## 🚀 Deployment Guide
+## 🚀 Development & Deployment Guide
 
 ### Prerequisites
-- [AWS CLI](https://aws.amazon.com/cli/) configured with appropriate IAM permissions.
+
+- [AWS CLI](https://aws.amazon.com/cli/) configured with valid IAM access credentials.
+- [Node.js (v18+)](https://nodejs.org/) & `npm` installed locally.
 - [Python 3.13](https://www.python.org/) installed locally.
-- An active [OpenAI API Key](https://platform.openai.com/).
-- A residential proxy service (e.g., [DataImpulse](https://dataimpulse.com/)).
 
-### 1. Provision Infrastructure
-1. **SSM Parameter Store:** Create a `SecureString` parameter containing your OpenAI API Key named `/youtube-summarizer/openai-api-key`.
-2. **DynamoDB:** Create a table named `youtube-summaries` with Partition Key `video_id` (`String`).
-3. **IAM Role:** Assign `AmazonDynamoDBFullAccess` and `AmazonSSMReadOnlyAccess` policy permissions to your Lambda function's execution role.
+---
 
-### 2. Build Deployment Package
-Run the automated packaging script to build a cross-compiled ZIP package for AWS Lambda:
+### 1. Frontend Local Development & Deployment
+
+#### Run Locally
 
 ```bash
+cd frontend
+npm install
+npm run dev
+```
+
+#### Deploy to AWS (S3 + CloudFront)
+
+Make sure deploy-frontend.sh is executable, then run it from the root directory:
+
+```Bash
+chmod +x deploy-frontend.sh
+./deploy-frontend.sh
+```
+
+This script compiles production assets (npm run build), syncs the dist/ directory to S3, and invalidates the CloudFront CDN cache.
+
+### 2\. Backend Lambda Build & Deployment
+
+#### Package for AWS Lambda
+
+Run the cross-platform packaging script inside the `backend/` directory:
+
+```Bash
+cd backend
 chmod +x build.sh
 ./build.sh
 ```
 
-This script:
-- Cleans up existing build directories.
-- Downloads dependencies targeting `manylinux2014_x86_64` for Python 3.13.
-- Bundles `src/lambda_function.py` and library packages directly at the ZIP root.
-- Generates `deployment.zip`.
+This script downloads Linux binaries (`manylinux2014_x86_64`) targeting Python 3.13 and bundles `src/lambda_function.py` into `deployment.zip`.
 
-### 3. Deploy to AWS Lambda
-1. In the AWS Lambda Console, upload `deployment.zip` to your function (`youtube-summarizer`).
-2. Configure environment variables (`PROXY_URL`, `DYNAMODB_TABLE`, `SSM_PARAM_NAME`).
-3. Set Lambda function timeout to **30 seconds**.
+#### Deploy Zip to Lambda
 
-### 4. API Gateway & Frontend Setup
-1. Create a `POST /summarize` route in API Gateway with CORS enabled.
-2. Deploy the API Gateway to a stage (e.g., `prod`).
-3. Update `API_ENDPOINT` in `app.js` with your API Gateway full URL.
-4. Upload frontend assets to S3 and invalidate/refresh CloudFront cache if applicable.
-
----
+Upload the generated `deployment.zip` to the `youtube-summarizer` function via the AWS Lambda Console or AWS CLI.
 
 ## 🔍 Troubleshooting & Lessons Learned
 
-| Issue | Root Cause | Resolution |
-| :--- | :--- | :--- |
-| `ImportModuleError: pydantic_core` | Compiled C-extensions built on macOS/Windows differ from Lambda Linux binaries. | Used `--platform manylinux2014_x86_64` and `--only-binary=:all:` in `pip install`. |
-| `YouTubeTranscriptApi has no attribute get_transcript` | `youtube-transcript-api` v1.0.0+ removed static methods. | Refactored code to instantiate class (`ytt_api = YouTubeTranscriptApi()`) and use `.fetch()`. |
-| `IP Blocked / RequestBlocked` | YouTube blocks known AWS Cloud Provider IP ranges. | Routed requests through residential proxy via `GenericProxyConfig`. |
-| `Unable to import module 'lambda_function'` | Dependencies wrapped in nested `package/` folder inside ZIP archive. | Updated build script to `cd package && zip -r ../deployment.zip .`. |
-
----
+| **Issue** | **Cause** | **Resolution** |
+| --------- | --------- | -------------- |
+|`ImportModuleError: pydantic_core`| Native C-extensions built on macOS/Windows differ from Lambda Linux binaries. | Used `--platform manylinux2014_x86_64` and `--only-binary=:all:` in `pip install`.|
+|`YouTubeTranscriptApi has no attribute get_transcript`| Breaking changes in `youtube-transcript-api` v1.0.0+.| Refactored code to instantiate `YouTubeTranscriptApi()` and invoke `.fetch()`. |
+|`IP Blocked / RequestBlocked`| YouTube blocks known AWS datacenter IP ranges.| Routed transcript requests through residential proxies via `GenericProxyConfig`. |
+|`Module 'lucide-react' has no exported member 'Youtube'`| Lucide intentionally excludes trademarked brand icons. | Installed `react-icons` and imported `FaYoutube` from `react-icons/fa`. |
+|`SyntaxError: ... export named 'StatusState'`| Vite transpiler requirement for type imports. | Explicitly imported types using `import type { StatusState } from '../types'`. |
+|`InvalidAccessKeyId` during S3 sync|Outdated or missing local AWS CLI credentials.|Cleared stale environment variables (`unset AWS_ACCESS_KEY_ID`) and re-authenticated via `aws configure`.|
 
 ## 📜 License
 Distributed under the MIT License.
