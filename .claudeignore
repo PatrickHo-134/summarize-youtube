@@ -1,0 +1,14 @@
+# Dependencies
+frontend/node_modules/
+backend/package/
+.venv/
+__pycache__/
+
+# Build Outputs
+frontend/dist/
+backend/deployment.zip
+
+# Environment & Temp Files
+.env
+.env.local
+*.log
