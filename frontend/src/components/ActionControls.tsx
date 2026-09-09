@@ -45,7 +45,7 @@ export const ActionControls: React.FC<ActionControlsProps> = ({
           className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition cursor-pointer"
         >
           <Mail className="w-4 h-4" />
-          <span>Email Summary</span>
+          <span>Send to Email</span>
         </button>
       </div>
     );

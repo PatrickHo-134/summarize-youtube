@@ -96,6 +96,43 @@ p {
   margin: 0;
 }
 
+.summary-content {
+  color: #333333;
+  text-align: left;
+
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    color: #111111;
+    margin: 1.25em 0 0.5em;
+    text-align: left;
+  }
+
+  h1 { font-size: 1.75em; letter-spacing: normal; }
+  h2 { font-size: 1.4em; letter-spacing: normal; margin: 1em 0 0.5em; }
+  h3 { font-size: 1.2em; }
+  h4 { font-size: 1.05em; }
+
+  p {
+    margin: 0.75em 0;
+  }
+
+  ul, ol {
+    padding-left: 1.75em;
+    margin: 0.75em 0;
+  }
+
+  ul { list-style-type: disc; }
+  ol { list-style-type: decimal; }
+
+  li {
+    margin: 0.35em 0;
+    display: list-item;
+  }
+
+  strong { font-weight: 700; }
+  em { font-style: italic; }
+}
+
 code,
 .counter {
   font-family: var(--mono);
