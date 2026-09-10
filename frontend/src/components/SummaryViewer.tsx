@@ -27,7 +27,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({ summary, source })
         )}
       </div>
 
-      <div className="prose prose-indigo max-w-none text-gray-800 leading-relaxed space-y-4">
+      <div className="summary-content leading-relaxed">
         <ReactMarkdown>{summary}</ReactMarkdown>
       </div>
     </div>
