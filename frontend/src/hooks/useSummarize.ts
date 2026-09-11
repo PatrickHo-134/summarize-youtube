@@ -1,58 +1,55 @@
 import { useState } from 'react';
-import { type StatusState } from '../types';
-
-const API_ENDPOINT = 'https://etx5b18bqf.execute-api.ap-southeast-2.amazonaws.com/prod/summarize';
+import type { SummarizeResponse } from '../types';
+import { getAuthToken } from '../services/auth';
 
 export function useSummarize() {
-  const [status, setStatus] = useState<StatusState>('idle');
-  const [summary, setSummary] = useState<string>('');
-  const [source, setSource] = useState<'cache' | 'llm' | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [lastUrl, setLastUrl] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<SummarizeResponse | null>(null);
+  const [needsAuth, setNeedsAuth] = useState<boolean>(false);
 
-  const summarize = async (url: string) => {
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl) return;
+  const submitUrl = async (youtubeUrl: string) => {
+    setError(null);
+    setLoading(true);
 
-    setLastUrl(trimmedUrl);
-    setStatus('loading');
-    setErrorMessage('');
+    const token = await getAuthToken();
+
+    if (!token) {
+      setNeedsAuth(true);
+      setLoading(false);
+      return;
+    }
 
     try {
-      const response = await fetch(API_ENDPOINT, {
+      const response = await fetch(`${import.meta.env.VITE_API_ENDPOINT}/summarize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmedUrl }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ url: youtubeUrl }),
       });
 
-      const data = await response.json();
+      const json = await response.json();
 
-      if (response.ok) {
-        setSummary(data.summary);
-        setSource(data.source);
-        setStatus('success');
+      if (!response.ok) {
+        setError(json.error ?? `Request failed with status ${response.status}`);
       } else {
-        setErrorMessage(data.error || 'Failed to summarize video.');
-        setStatus('error');
+        setData(json as SummarizeResponse);
       }
-    } catch (err) {
-      setErrorMessage('Network Error: Unable to reach the API endpoint.');
-      setStatus('error');
-    }
-  };
-
-  const retry = () => {
-    if (lastUrl) {
-      summarize(lastUrl);
+    } catch {
+      setError('Network Error: Unable to reach the API endpoint.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return {
-    status,
-    summary,
-    source,
-    errorMessage,
-    summarize,
-    retry,
+    loading,
+    error,
+    data,
+    needsAuth,
+    setNeedsAuth,
+    submitUrl,
   };
 }
