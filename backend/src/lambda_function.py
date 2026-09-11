@@ -9,6 +9,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
 from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
+from openai import RateLimitError, APITimeoutError, BadRequestError
 
 # Initialize logger
 logger = logging.getLogger()
@@ -95,10 +96,14 @@ def get_transcript(video_id):
         # Combine text segments into a single string
         full_content = " ".join(snippet['text'] for snippet in transcript_list)
         return full_content, None
-    except (TranscriptsDisabled, VideoUnavailable, NoTranscriptFound) as e:
-        return None, str(e)
+    except VideoUnavailable:
+        return None, "This video is unavailable (deleted, private, or region-blocked)."
+    except TranscriptsDisabled:
+        return None, "Transcripts are disabled for this video."
+    except NoTranscriptFound:
+        return None, "No transcript found for this video in any language."
     except Exception as e:
-        return None, f"An error occurred: {str(e)}"
+        return None, f"An error occurred fetching the transcript: {str(e)}"
 
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
@@ -159,6 +164,14 @@ def summarise(content):
             n=1
         )
         return completion.choices[0].message.content, None
+    except RateLimitError:
+        return None, "OpenAI rate limit reached. Please try again in a moment."
+    except APITimeoutError:
+        return None, "OpenAI request timed out. Please try again."
+    except BadRequestError as e:
+        if "context_length_exceeded" in str(e) or "maximum context length" in str(e).lower():
+            return None, "This video's transcript is too long to summarize."
+        return None, f"OpenAI rejected the request: {str(e)}"
     except Exception as e:
         return None, f"LLM Provider Error: {str(e)}"
 
