@@ -7,18 +7,19 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 ## 🏗️ System Architecture
 
 ```
-[ User Browser ]
+[ User Browser (Amplify Auth) ]
        │
        ▼
 [ CloudFront CDN ] ──► [ S3 Bucket (Vite + React + TS Static Build) ]
        │
-       ▼ (REST API Call)
-[ AWS API Gateway ] (/summarize)
+       ▼ (REST API Call + JWT Bearer Token)
+[ AWS API Gateway ] (/summarize with Cognito Authorizer)
        │
        ▼
 [ AWS Lambda (Python 3.13) ]
        ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
-       ├──► [ DynamoDB Cache ]      (Read/Write Summaries)
+       ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
+       ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
        ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
        └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
 ```
@@ -26,16 +27,19 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 ### Tech Stack
 
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
+- **Authentication:** Amazon Cognito User Pools mapped via the AWS Amplify v6 `@aws-amplify/ui-react` SDK.
 - **Hosting & Distribution:** Amazon S3 (Private Bucket) + CloudFront CDN with Origin Access Control (OAC).
-- **API Gateway:** REST API (`POST /summarize`) with CORS enabled.
+- **API Gateway:** REST API (`POST /summarize`) secured via Cognito Authorizer with CORS enabled.
 - **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
-- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` table) and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
+- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables) and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
 - **External Integrations:** `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig`, OpenAI API (`gpt-4o-mini`), DataImpulse Residential Proxy.
 
 ---
 
 ## ✨ Features
 
+- **Progressive Engagement:** Employs "lazy registration" by allowing unauthenticated users to view the landing page and enter a URL. The system intercepts the submission and presents a styled auth modal only when an action is attempted.
+- **Secure API & Content Tracking:** Blocks unauthorized backend requests at the edge via API Gateway. Maps individual `user_id` to `video_id` submissions in DynamoDB, ensuring content visibility boundaries and enabling user history lookups.
 - **Beautiful Markdown Rendering:** Transforms LLM bullet points and headers into formatted HTML using `react-markdown`.
 - **Cache Hit Indicator:** Real-time visual badge highlighting whether a summary was newly **Generated** via OpenAI or loaded instantly from the **Cached** DynamoDB store.
 - **Cost-Optimized Caching:** Prevents duplicate LLM and proxy API costs by verifying cached video IDs in DynamoDB prior to execution.
@@ -56,9 +60,11 @@ SUMMARIZE-YOUTUBE/
 │   ├── requirements.txt      # Production dependencies
 │   └── requirements-dev.txt  # Development dependencies
 ├── frontend/                 # Vite + React + TypeScript App
+│   ├── .env.local            # Local development config variables
 │   ├── src/
-│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx
-│   │   ├── hooks/            # Custom fetch & state hook (useSummarize.ts)
+│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, AuthModal.tsx
+│   │   ├── hooks/            # Custom fetch & auth state hook (useSummarize.ts)
+│   │   ├── services/         # Token handling module (auth.ts)
 │   │   ├── types/            # TypeScript interface declarations
 │   │   ├── App.tsx           # Main application layout
 │   │   └── main.tsx
@@ -73,6 +79,14 @@ SUMMARIZE-YOUTUBE/
 
 ## ⚙️ Environment Variables & Configuration
 
+### Frontend React/Vite Variables (`frontend/.env.production`)
+
+| **Variable Key** | **Description** | **Example Value** |
+| --- | --- | --- |
+| `VITE_COGNITO_USER_POOL_ID` | Cognito User Directory Identifier | `us-east-1_XXXXXXXXX` |
+| `VITE_COGNITO_USER_POOL_CLIENT_ID` | SPA App Client ID (Without secret) | `XXXXXXXXXXXXXXXXXXXXXXXXXX` |
+| `VITE_API_ENDPOINT` | Production API Gateway path | `https://etx5.../prod` |
+
 ### Backend Lambda Environment Variables
 
 | Variable Key     | Description                                        | Default / Example Value                       |
@@ -80,6 +94,7 @@ SUMMARIZE-YOUTUBE/
 | `PROXY_URL`      | Residential proxy gateway URL for YouTube requests | `http://USER:PASS@gw.dataimpulse.com:823`     |
 | `DYNAMODB_TABLE` | DynamoDB table name for cached summaries           | `youtube-summaries`                           |
 | `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key        | `/youtube-summarizer/openai-api-key` |
+| `USER_SUBMISSIONS_TABLE` | Mapping table for user authentication limits | `user-submissions` |
 
 ---
 
@@ -136,12 +151,7 @@ Upload the generated `deployment.zip` to the `youtube-summarizer` function via t
 
 | **Issue** | **Cause** | **Resolution** |
 | --------- | --------- | -------------- |
-|`ImportModuleError: pydantic_core`| Native C-extensions built on macOS/Windows differ from Lambda Linux binaries. | Used `--platform manylinux2014_x86_64` and `--only-binary=:all:` in `pip install`.|
-|`YouTubeTranscriptApi has no attribute get_transcript`| Breaking changes in `youtube-transcript-api` v1.0.0+.| Refactored code to instantiate `YouTubeTranscriptApi()` and invoke `.fetch()`. |
 |`IP Blocked / RequestBlocked`| YouTube blocks known AWS datacenter IP ranges.| Routed transcript requests through residential proxies via `GenericProxyConfig`. |
-|`Module 'lucide-react' has no exported member 'Youtube'`| Lucide intentionally excludes trademarked brand icons. | Installed `react-icons` and imported `FaYoutube` from `react-icons/fa`. |
-|`SyntaxError: ... export named 'StatusState'`| Vite transpiler requirement for type imports. | Explicitly imported types using `import type { StatusState } from '../types'`. |
-|`InvalidAccessKeyId` during S3 sync|Outdated or missing local AWS CLI credentials.|Cleared stale environment variables (`unset AWS_ACCESS_KEY_ID`) and re-authenticated via `aws configure`.|
 
 ## 📜 License
 Distributed under the MIT License.

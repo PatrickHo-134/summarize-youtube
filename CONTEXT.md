@@ -2,11 +2,11 @@
 
 ## 1. Project Overview & Architecture
 
-- **Goal:** Serverless full-stack web application that accepts a YouTube URL, fetches the transcript, generates a summary via OpenAI (GPT-4o-mini), and caches results in DynamoDB.
+- **Goal:** Serverless full-stack web application that accepts a YouTube URL, fetches the transcript, generates a summary via OpenAI (GPT-4o-mini), and caches results in DynamoDB. The system now utilizes Amazon Cognito User Pools for identity management, providing secure JWT-based authentication.
 - **Monorepo Structure:** Clean separation between isolated serverless backend service (`/backend`) and modern React UI (`/frontend`).
-- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`. Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
-- **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API (`POST /summarize`).
-- **Storage & Config:** DynamoDB (`youtube-summaries` table for caching), AWS SSM Parameter Store (OpenAI API Key), Lambda Environment Variables (`PROXY_URL`).
+- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`. It uses AWS Amplify v6 and the `@aws-amplify/ui-react` library to handle sign-up, login, and token management via modal overlays. Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
+- **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API (`POST /summarize`). The API is strictly protected by a Cognito User Pool Authorizer.
+- **Storage & Config:** DynamoDB (`youtube-summaries` table for caching, and a new `user-submissions` mapping table). AWS SSM Parameter Store stores the OpenAI API Key securely. Lambda Environment Variables include `PROXY_URL` and `USER_SUBMISSIONS_TABLE`.
 
 ---
 
@@ -21,9 +21,12 @@ SUMMARIZE-YOUTUBE/
 │   ├── requirements.txt      # Production dependencies (openai, youtube-transcript-api)
 │   └── requirements-dev.txt  # Local dev/test dependencies
 ├── frontend/                 # Vite + React + TypeScript Frontend
+│   ├── .env.local            # Local development frontend configuration
+│   ├── .env.production       # Static build configuration for CI/CD or deployment
 │   ├── src/
-│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx
-│   │   ├── hooks/            # useSummarize.ts (API state & retry management)
+│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx, AuthModal.tsx
+│   │   ├── hooks/            # useSummarize.ts (API state, auth checks, & retry management)
+│   │   ├── services/         # auth.ts (Token fetching and auth state helpers)
 │   │   ├── types/            # index.ts (FetchStatus, SummarizeResponse)
 │   │   ├── App.tsx           # Main application shell
 │   │   └── main.tsx
@@ -41,15 +44,21 @@ SUMMARIZE-YOUTUBE/
 - **CloudFront Domain:** `https://d1lixi6ffoheyhp.cloudfront.net`
   - Access Control: Origin Access Control (OAC) targeting private S3 bucket.
   - Default Root Object: `index.html`
+- **Amazon Cognito (Authentication):** Configured as a Single-page application (SPA) without a client secret to support the browser-based Vite application securely.
 - **API Gateway ID:** `etx5b18bqf`
   - Resource Path: `/summarize`
   - HTTP Method: `POST` (with `OPTIONS` enabled for CORS preflight).
+  - Edge Protection: A Cognito User Pool Authorizer (`Cognito-Summarizer-Auth`) validates tokens automatically before requests reach the backend
   - Stage: `prod`
   - Full Endpoint URL: `https://etx5b18bqf.execute-api.ap-southeast-2.amazonaws.com/prod/summarize`
 - **Lambda Function:** `youtube-summarizer`
   - Runtime: **Python 3.13** (`x86_64`)
   - Timeout: 30 seconds
+  - Authorization Extraction: Extracts the authenticated user's unique identifier (`sub` claim) passed securely from API Gateway to enforce data ownership
   - IAM Roles: `AmazonDynamoDBFullAccess`, `AmazonSSMReadOnlyAccess`
+- **DynamoDB Tables:**
+    *   `youtube-summaries` (Partition Key: `video_id`): Preserves global LLM caching to prevent duplicate OpenAI and proxy costs
+    *   `user-submissions` (Partition Key: `user_id`, Sort Key: `video_id`): Enforces content ownership and provides intrinsic support for future user history features
 
 ---
 
@@ -57,7 +66,7 @@ SUMMARIZE-YOUTUBE/
 
 ### A. Frontend Deployment (`deploy-frontend.sh`)
 
-Automates building Vite static assets, updating S3, and clearing CDN edge caches:
+Automates building Vite static assets, updating S3, and clearing CDN edge caches. The process hardcodes `.env.production` variables directly into the compiled JavaScript bundle for CloudFront distribution.
 
 ```bash
 #!/bin/bash
