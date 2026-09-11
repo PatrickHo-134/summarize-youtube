@@ -5,6 +5,8 @@ export interface SummaryResponse {
   source: 'cache' | 'llm';
 }
 
+export type SummarizeResponse = SummaryResponse;
+
 export interface ApiError {
   error: string;
 }

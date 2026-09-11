@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import re
+from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import ClientError
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -9,7 +10,7 @@ from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable
 from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
 
-# Initialize the logger at the global level
+# Initialize logger
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
@@ -17,10 +18,11 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 ssm = boto3.client('ssm')
 
-TABLE_NAME = os.environ.get("DYNAMODB_TABLE", "youtube-summaries")
+YOUTUBE_SUMMARIES_TABLE = os.environ.get("DYNAMODB_TABLE", "youtube-summaries")
+USER_SUBMISSIONS_TABLE = os.environ.get("USER_SUBMISSIONS_TABLE", "user-submissions")
 SSM_PARAM_NAME = os.environ.get("SSM_PARAM_NAME", "/youtube-summarizer/openai-api-key")
 
-# Global variable to cache the OpenAI client between warm Lambda invocations
+# Cache OpenAI client across warm Lambda invocations
 openai_client = None
 
 def get_openai_client():
@@ -35,7 +37,7 @@ def get_openai_client():
             api_key = response['Parameter']['Value']
             openai_client = OpenAI(api_key=api_key)
         except Exception as e:
-            print(f"Error fetching API key from SSM: {str(e)}")
+            logger.error(f"Error fetching API key from SSM: {str(e)}")
     return openai_client
 
 def extract_and_validate_video_id(youtube_url):
@@ -51,6 +53,15 @@ def extract_and_validate_video_id(youtube_url):
     if match:
         return match.group(1)
     return None
+
+def extract_user_id(event):
+    """Extracts unique user ID (sub claim) injected by API Gateway Cognito Authorizer."""
+    try:
+        claims = event.get('requestContext', {}).get('authorizer', {}).get('claims', {})
+        return claims.get('sub')
+    except Exception as e:
+        logger.error(f"Failed to extract user_id from context: {str(e)}")
+        return None
 
 def format_prompt_v2(content):
     return f"""
@@ -92,18 +103,18 @@ def get_transcript(video_id):
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
     try:
-        table = dynamodb.Table(TABLE_NAME)
+        table = dynamodb.Table(YOUTUBE_SUMMARIES_TABLE)
         response = table.get_item(Key={'video_id': video_id})
         if 'Item' in response:
             return response['Item'].get('summary')
     except ClientError as e:
-        print(f"DynamoDB read error: {e.response['Error']['Message']}")
+        logger.error(f"DynamoDB read error (youtube-summaries): {e.response['Error']['Message']}")
     return None
 
 def save_to_cache(video_id, summary):
     """Saves the generated summary to DynamoDB."""
     try:
-        table = dynamodb.Table(TABLE_NAME)
+        table = dynamodb.Table(YOUTUBE_SUMMARIES_TABLE)
         table.put_item(
             Item={
                 'video_id': video_id,
@@ -111,7 +122,22 @@ def save_to_cache(video_id, summary):
             }
         )
     except ClientError as e:
-        print(f"DynamoDB write error: {e.response['Error']['Message']}")
+        logger.error(f"DynamoDB write error (youtube-summaries): {e.response['Error']['Message']}")
+
+def record_user_submission(user_id, video_id):
+    """Records mapping between user_id and video_id in user-submissions table."""
+    try:
+        table = dynamodb.Table(USER_SUBMISSIONS_TABLE)
+        table.put_item(
+            Item={
+                'user_id': user_id,
+                'video_id': video_id,
+                'created_at': datetime.now(timezone.utc).isoformat()
+            }
+        )
+        logger.info(f"Recorded user submission: user_id={user_id}, video_id={video_id}")
+    except ClientError as e:
+        logger.error(f"DynamoDB write error (user-submissions): {e.response['Error']['Message']}")
 
 def summarise(content):
     client = get_openai_client()
@@ -136,10 +162,21 @@ def summarise(content):
     except Exception as e:
         return None, f"LLM Provider Error: {str(e)}"
 
-# AWS Lambda Entry Point
 def lambda_handler(event, context):
     try:
         logger.info(f"Incoming event body: {event.get('body')}")
+
+        # Extract & validate authenticated user identity
+        user_id = extract_user_id(event)
+        if not user_id:
+            logger.warning("Unauthorized access attempt: Missing or invalid user claims.")
+            return {
+                'statusCode': 401,
+                'headers': {'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Unauthorized user token.'})
+            }
+
+        logger.info(f"Request authorized for User ID: {user_id}")
 
         body = json.loads(event.get('body', '{}'))
         youtube_url = body.get('url')
@@ -155,6 +192,9 @@ def lambda_handler(event, context):
             }
 
         logger.info(f"Successfully extracted Video ID: {video_id}")
+
+        # Record ownership mapping for this user
+        record_user_submission(user_id, video_id)
 
         # Log the cache check
         logger.info("Checking DynamoDB cache...")
@@ -203,7 +243,6 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        # Log unexpected crashes with full stack traces
         logger.exception("An unexpected error occurred during Lambda execution.")
         return {
             'statusCode': 500,
