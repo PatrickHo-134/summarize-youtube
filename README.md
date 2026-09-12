@@ -1,6 +1,6 @@
 # Serverless YouTube Summarizer (AWS Cloud-Native)
 
-![version](https://img.shields.io/badge/version-1.1.0-blue)
+![version](https://img.shields.io/badge/version-1.2.0-blue)
 
 An end-to-end, serverless web application that accepts a YouTube URL, extracts its transcript, generates a structured summary using OpenAI's GPT-4o-mini, and caches the results in DynamoDB. The application features a modern React/TypeScript frontend distributed globally via CloudFront from a private S3 bucket.
 
