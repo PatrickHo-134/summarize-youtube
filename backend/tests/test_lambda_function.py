@@ -1,7 +1,8 @@
 import os
 import json
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
+import httpx2
 
 os.environ["AWS_DEFAULT_REGION"] = "ap-southeast-2"
 os.environ["DYNAMODB_TABLE"] = "youtube-summaries"
@@ -11,9 +12,18 @@ with patch('boto3.client'), patch('boto3.resource'):
     from src.lambda_function import (
         extract_and_validate_video_id,
         lambda_handler,
-        get_transcript
+        get_transcript,
+        summarise,
     )
-    from youtube_transcript_api._errors import TranscriptsDisabled
+    from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
+    from openai import RateLimitError, APITimeoutError, BadRequestError
+
+
+def make_openai_response(status_code=429):
+    mock_response = MagicMock()
+    mock_response.headers = {'x-request-id': 'test-id'}
+    mock_response.status_code = status_code
+    return mock_response
 
 AUTHED_EVENT_BASE = {
     "requestContext": {
@@ -98,3 +108,157 @@ def test_lambda_handler_transcript_disabled(mock_get_transcript, mock_check_cach
     assert response["statusCode"] == 400
     body = json.loads(response["body"])
     assert "Transcripts are disabled" in body["error"]
+
+
+# --- YouTube Exception Tests (get_transcript isolation) ---
+
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_video_unavailable(mock_ytt_class):
+    mock_ytt_class.return_value.fetch.side_effect = VideoUnavailable("abc123")
+
+    content, error, status = get_transcript("abc123")
+
+    assert content is None
+    assert status == 400
+    assert "unavailable" in error.lower()
+
+
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_transcripts_disabled(mock_ytt_class):
+    mock_ytt_class.return_value.fetch.side_effect = TranscriptsDisabled("abc123")
+
+    content, error, status = get_transcript("abc123")
+
+    assert content is None
+    assert status == 400
+    assert "disabled" in error.lower()
+
+
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_no_transcript_found(mock_ytt_class):
+    mock_ytt_class.return_value.fetch.side_effect = NoTranscriptFound("abc123", [], {})
+
+    content, error, status = get_transcript("abc123")
+
+    assert content is None
+    assert status == 400
+    assert "no transcript" in error.lower()
+
+
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_all_proxies_exhausted(mock_ytt_class):
+    mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
+
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080,http://proxy2:8080"}):
+        with patch('src.lambda_function.time.sleep'):
+            content, error, status = get_transcript("abc123")
+
+    assert content is None
+    assert status == 429
+    assert "proxies exhausted" in error.lower()
+
+
+# --- OpenAI Exception Tests (summarise isolation) ---
+
+@patch('src.lambda_function.get_openai_client')
+def test_summarise_rate_limit_error(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RateLimitError(
+        "rate limit exceeded", response=make_openai_response(429), body=None
+    )
+    mock_get_client.return_value = mock_client
+
+    result, error, status = summarise("some transcript")
+
+    assert result is None
+    assert status == 429
+    assert "rate limit" in error.lower()
+
+
+@patch('src.lambda_function.get_openai_client')
+def test_summarise_timeout_error(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = APITimeoutError(
+        request=MagicMock(spec=httpx2.Request)
+    )
+    mock_get_client.return_value = mock_client
+
+    result, error, status = summarise("some transcript")
+
+    assert result is None
+    assert status == 504
+    assert "timed out" in error.lower()
+
+
+@patch('src.lambda_function.get_openai_client')
+def test_summarise_context_length_exceeded(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = BadRequestError(
+        "context_length_exceeded: max tokens", response=make_openai_response(400), body=None
+    )
+    mock_get_client.return_value = mock_client
+
+    result, error, status = summarise("some transcript")
+
+    assert result is None
+    assert status == 400
+    assert "too long" in error.lower()
+
+
+@patch('src.lambda_function.get_openai_client')
+def test_summarise_bad_request_other(mock_get_client):
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = BadRequestError(
+        "invalid model", response=make_openai_response(400), body=None
+    )
+    mock_get_client.return_value = mock_client
+
+    result, error, status = summarise("some transcript")
+
+    assert result is None
+    assert status == 400
+    assert "OpenAI rejected" in error
+
+
+# --- HTTP Status Code Mapping (lambda_handler integration) ---
+
+@patch('src.lambda_function.record_user_submission')
+@patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_transcript')
+@patch('src.lambda_function.summarise')
+def test_lambda_handler_openai_rate_limit_returns_429(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+    mock_check_cache.return_value = None
+    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_summarise.return_value = (None, "OpenAI rate limit reached. Please try again in a moment.", 429)
+
+    response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
+
+    assert response["statusCode"] == 429
+
+
+@patch('src.lambda_function.record_user_submission')
+@patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_transcript')
+@patch('src.lambda_function.summarise')
+def test_lambda_handler_openai_timeout_returns_504(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+    mock_check_cache.return_value = None
+    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_summarise.return_value = (None, "OpenAI request timed out. Please try again.", 504)
+
+    response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
+
+    assert response["statusCode"] == 504
+
+
+@patch('src.lambda_function.record_user_submission')
+@patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_transcript')
+@patch('src.lambda_function.summarise')
+def test_lambda_handler_transcript_too_long_returns_400(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+    mock_check_cache.return_value = None
+    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_summarise.return_value = (None, "This video's transcript is too long to summarize.", 400)
+
+    response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
+
+    assert response["statusCode"] == 400
