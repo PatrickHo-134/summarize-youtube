@@ -145,17 +145,104 @@ def test_get_transcript_no_transcript_found(mock_ytt_class):
     assert "no transcript" in error.lower()
 
 
+@patch('src.lambda_function.time.sleep')
 @patch('src.lambda_function.YouTubeTranscriptApi')
-def test_get_transcript_all_proxies_exhausted(mock_ytt_class):
+def test_get_transcript_all_proxies_exhausted(mock_ytt_class, mock_sleep):
     mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
 
     with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080,http://proxy2:8080"}):
-        with patch('src.lambda_function.time.sleep'):
-            content, error, status = get_transcript("abc123")
+        content, error, status = get_transcript("abc123")
 
     assert content is None
     assert status == 429
     assert "proxies exhausted" in error.lower()
+    assert mock_sleep.call_count == 1
+
+
+@patch('src.lambda_function.time.sleep')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_succeeds_on_second_proxy(mock_ytt_class, mock_sleep):
+    failing_instance = MagicMock()
+    failing_instance.fetch.side_effect = Exception("429 Too Many Requests")
+
+    success_instance = MagicMock()
+    transcript_snippet = MagicMock()
+    transcript_snippet.__getitem__ = lambda self, key: "Hello world" if key == "text" else None
+    success_instance.fetch.return_value.to_raw_data.return_value = [{"text": "Hello world"}]
+
+    mock_ytt_class.side_effect = [failing_instance, success_instance]
+
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080,http://proxy2:8080"}):
+        content, error, status = get_transcript("abc123")
+
+    assert error is None
+    assert status is None
+    assert content == "Hello world"
+    assert mock_sleep.call_count == 1
+
+
+@patch('src.lambda_function.time.sleep')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_retries_all_proxies_before_exhaustion(mock_ytt_class, mock_sleep):
+    mock_ytt_class.return_value.fetch.side_effect = Exception("Blocked")
+
+    pool = "http://p1:8080,http://p2:8080,http://p3:8080"
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+        content, error, status = get_transcript("abc123")
+
+    assert status == 429
+    assert mock_ytt_class.call_count == 3
+    assert mock_sleep.call_count == 2
+
+
+@patch('src.lambda_function.time.sleep')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_get_transcript_no_sleep_on_first_attempt(mock_ytt_class, mock_sleep):
+    mock_ytt_class.return_value.fetch.side_effect = Exception("Blocked")
+
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080"}):
+        get_transcript("abc123")
+
+    mock_sleep.assert_not_called()
+
+
+@patch('src.lambda_function.record_user_submission')
+@patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.time.sleep')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_lambda_handler_all_proxies_fail_returns_429(mock_ytt_class, mock_sleep, mock_check_cache, mock_record):
+    mock_check_cache.return_value = None
+    mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
+
+    pool = "http://p1:8080,http://p2:8080"
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+        response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
+
+    assert response["statusCode"] == 429
+    body = json.loads(response["body"])
+    assert "proxies exhausted" in body["error"].lower()
+    assert mock_ytt_class.call_count == 2
+    assert mock_sleep.call_count == 1
+
+
+@patch('src.lambda_function.time.sleep')
+@patch('src.lambda_function.YouTubeTranscriptApi')
+def test_non_retryable_error_bypasses_proxy_rotation(mock_ytt_class, mock_sleep):
+    proxy1_instance = MagicMock()
+    proxy1_instance.fetch.side_effect = VideoUnavailable("abc123")
+    proxy2_instance = MagicMock()
+    mock_ytt_class.side_effect = [proxy1_instance, proxy2_instance]
+
+    pool = "http://p1:8080,http://p2:8080"
+    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+        content, error, status = get_transcript("abc123")
+
+    assert content is None
+    assert status == 400
+    assert "unavailable" in error.lower()
+    assert mock_ytt_class.call_count == 1
+    proxy2_instance.fetch.assert_not_called()
+    mock_sleep.assert_not_called()
 
 
 # --- OpenAI Exception Tests (summarise isolation) ---
