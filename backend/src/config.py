@@ -14,9 +14,10 @@ def _optional(name: str, default: str = "") -> str:
 
 YOUTUBE_SUMMARIES_TABLE: str = _optional("DYNAMODB_TABLE", "youtube-summaries")
 USER_SUBMISSIONS_TABLE: str = _optional("USER_SUBMISSIONS_TABLE", "user-submissions")
-SSM_PARAM_NAME: str = _require("SSM_PARAM_NAME")
 CORS_ALLOW_ORIGIN: str = _optional("CORS_ALLOW_ORIGIN", "*")
 LLM_MODEL: str = _optional("LLM_MODEL", "gpt-4o-mini")
 LLM_MAX_TOKENS: int = int(_optional("LLM_MAX_TOKENS", "1000"))
 LLM_TEMPERATURE: float = float(_optional("LLM_TEMPERATURE", "0.7"))
+# these configs are stored in lambda environment variables
 PROXY_POOL_URLS: str = _optional("PROXY_POOL_URLS") or _optional("PROXY_URL")
+SSM_PARAM_NAME: str = _require("SSM_PARAM_NAME")
