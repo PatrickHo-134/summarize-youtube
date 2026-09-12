@@ -2,6 +2,8 @@ import os
 import logging
 import json
 import re
+import time
+import random
 from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import ClientError
@@ -72,38 +74,50 @@ def format_prompt_v2(content):
             {content}
             """
 
+def _get_proxy_pool():
+    pool_env = os.environ.get("PROXY_POOL_URLS") or os.environ.get("PROXY_URL")
+    if not pool_env:
+        return [None]
+    proxies = [p.strip() for p in pool_env.split(",") if p.strip()]
+    return proxies if proxies else [None]
+
+
 def get_transcript(video_id):
-    try:
-        # Check for the Proxy URL environment variable
-        proxy_url = os.environ.get("PROXY_URL")
+    proxies = _get_proxy_pool()
+    last_error = None
 
-        # Instantiate the API object, using the proxy if the variable exists
-        if proxy_url:
-            proxy_config = GenericProxyConfig(
-                http_url=proxy_url,
-                https_url=proxy_url
-            )
-            ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
-        else:
-            ytt_api = YouTubeTranscriptApi()
+    for attempt, proxy_url in enumerate(proxies):
+        if attempt > 0:
+            backoff = (2 ** attempt) + random.uniform(0, 1)
+            logger.warning(f"Proxy attempt {attempt} failed. Retrying with next proxy in {backoff:.2f}s.")
+            time.sleep(backoff)
 
-        # Fetch the transcript object
-        fetched_transcript = ytt_api.fetch(video_id)
+        try:
+            if proxy_url:
+                proxy_config = GenericProxyConfig(
+                    http_url=proxy_url,
+                    https_url=proxy_url
+                )
+                ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+            else:
+                ytt_api = YouTubeTranscriptApi()
 
-        # Convert back to the list of dictionaries
-        transcript_list = fetched_transcript.to_raw_data()
+            fetched_transcript = ytt_api.fetch(video_id)
+            transcript_list = fetched_transcript.to_raw_data()
+            full_content = " ".join(snippet['text'] for snippet in transcript_list)
+            return full_content, None, None
 
-        # Combine text segments into a single string
-        full_content = " ".join(snippet['text'] for snippet in transcript_list)
-        return full_content, None, None
-    except VideoUnavailable:
-        return None, "This video is unavailable (deleted, private, or region-blocked).", 400
-    except TranscriptsDisabled:
-        return None, "Transcripts are disabled for this video.", 400
-    except NoTranscriptFound:
-        return None, "No transcript found for this video in any language.", 400
-    except Exception as e:
-        return None, f"An error occurred fetching the transcript: {str(e)}", 502
+        except VideoUnavailable:
+            return None, "This video is unavailable (deleted, private, or region-blocked).", 400
+        except TranscriptsDisabled:
+            return None, "Transcripts are disabled for this video.", 400
+        except NoTranscriptFound:
+            return None, "No transcript found for this video in any language.", 400
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Transcript fetch failed with proxy '{proxy_url}': {last_error}")
+
+    return None, f"All proxies exhausted. Last error: {last_error}", 429
 
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
