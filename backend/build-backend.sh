@@ -17,7 +17,7 @@ pip install \
   youtube-transcript-api openai
 
 echo "Copying lambda function code..."
-cp src/lambda_function.py package/
+cp -r src package/src
 
 echo "Zipping deployment package..."
 cd package
