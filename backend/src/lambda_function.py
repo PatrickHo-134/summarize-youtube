@@ -2,6 +2,8 @@ import os
 import logging
 import json
 import re
+import time
+import random
 from datetime import datetime, timezone
 import boto3
 from botocore.exceptions import ClientError
@@ -9,6 +11,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
 from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
+from openai import RateLimitError, APITimeoutError, BadRequestError
 
 # Initialize logger
 logger = logging.getLogger()
@@ -71,34 +74,50 @@ def format_prompt_v2(content):
             {content}
             """
 
+def _get_proxy_pool():
+    pool_env = os.environ.get("PROXY_POOL_URLS") or os.environ.get("PROXY_URL")
+    if not pool_env:
+        return [None]
+    proxies = [p.strip() for p in pool_env.split(",") if p.strip()]
+    return proxies if proxies else [None]
+
+
 def get_transcript(video_id):
-    try:
-        # Check for the Proxy URL environment variable
-        proxy_url = os.environ.get("PROXY_URL")
+    proxies = _get_proxy_pool()
+    last_error = None
 
-        # Instantiate the API object, using the proxy if the variable exists
-        if proxy_url:
-            proxy_config = GenericProxyConfig(
-                http_url=proxy_url,
-                https_url=proxy_url
-            )
-            ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
-        else:
-            ytt_api = YouTubeTranscriptApi()
+    for attempt, proxy_url in enumerate(proxies):
+        if attempt > 0:
+            backoff = (2 ** attempt) + random.uniform(0, 1)
+            logger.warning(f"Proxy attempt {attempt} failed. Retrying with next proxy in {backoff:.2f}s.")
+            time.sleep(backoff)
 
-        # Fetch the transcript object
-        fetched_transcript = ytt_api.fetch(video_id)
+        try:
+            if proxy_url:
+                proxy_config = GenericProxyConfig(
+                    http_url=proxy_url,
+                    https_url=proxy_url
+                )
+                ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+            else:
+                ytt_api = YouTubeTranscriptApi()
 
-        # Convert back to the list of dictionaries
-        transcript_list = fetched_transcript.to_raw_data()
+            fetched_transcript = ytt_api.fetch(video_id)
+            transcript_list = fetched_transcript.to_raw_data()
+            full_content = " ".join(snippet['text'] for snippet in transcript_list)
+            return full_content, None, None
 
-        # Combine text segments into a single string
-        full_content = " ".join(snippet['text'] for snippet in transcript_list)
-        return full_content, None
-    except (TranscriptsDisabled, VideoUnavailable, NoTranscriptFound) as e:
-        return None, str(e)
-    except Exception as e:
-        return None, f"An error occurred: {str(e)}"
+        except VideoUnavailable:
+            return None, "This video is unavailable (deleted, private, or region-blocked).", 400
+        except TranscriptsDisabled:
+            return None, "Transcripts are disabled for this video.", 400
+        except NoTranscriptFound:
+            return None, "No transcript found for this video in any language.", 400
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Transcript fetch failed with proxy '{proxy_url}': {last_error}")
+
+    return None, f"All proxies exhausted. Last error: {last_error}", 429
 
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
@@ -142,7 +161,7 @@ def record_user_submission(user_id, video_id):
 def summarise(content):
     client = get_openai_client()
     if not client:
-        return None, "OpenAI client is not initialized. Check SSM configuration."
+        return None, "OpenAI client is not initialized. Check SSM configuration.", 502
 
     engine = "gpt-4o-mini"
     max_tokens = 1000
@@ -158,9 +177,17 @@ def summarise(content):
             max_tokens=max_tokens,
             n=1
         )
-        return completion.choices[0].message.content, None
+        return completion.choices[0].message.content, None, None
+    except RateLimitError:
+        return None, "OpenAI rate limit reached. Please try again in a moment.", 429
+    except APITimeoutError:
+        return None, "OpenAI request timed out. Please try again.", 504
+    except BadRequestError as e:
+        if "context_length_exceeded" in str(e) or "maximum context length" in str(e).lower():
+            return None, "This video's transcript is too long to summarize.", 400
+        return None, f"OpenAI rejected the request: {str(e)}", 400
     except Exception as e:
-        return None, f"LLM Provider Error: {str(e)}"
+        return None, f"LLM Provider Error: {str(e)}", 502
 
 def lambda_handler(event, context):
     try:
@@ -211,11 +238,11 @@ def lambda_handler(event, context):
         proxy_configured = bool(os.environ.get('PROXY_URL'))
         logger.info(f"Cache miss. Fetching transcript... (Proxy Configured: {proxy_configured})")
 
-        transcript, error = get_transcript(video_id)
+        transcript, error, error_status = get_transcript(video_id)
         if error:
             logger.error(f"Transcript fetch failed: {error}")
             return {
-                'statusCode': 400,
+                'statusCode': error_status,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': error})
             }
@@ -224,11 +251,11 @@ def lambda_handler(event, context):
 
         # Log the LLM execution (Another common timeout point)
         logger.info("Sending transcript to OpenAI...")
-        summary, llm_error = summarise(transcript)
+        summary, llm_error, llm_status = summarise(transcript)
         if llm_error:
             logger.error(f"OpenAI API failed: {llm_error}")
             return {
-                'statusCode': 502,
+                'statusCode': llm_status,
                 'headers': {'Access-Control-Allow-Origin': '*'},
                 'body': json.dumps({'error': llm_error})
             }

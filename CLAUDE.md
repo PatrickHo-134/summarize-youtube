@@ -13,7 +13,8 @@
 - **Deploy Static Site:** `./deploy-frontend.sh`
 
 ### Backend (`/backend`)
-- **Run Tests:** `cd backend && python -m pytest tests/`
+- **Run Tests:** `backend/venv/bin/python -m pytest backend/tests/test_lambda_function.py -v`
+- **First-time venv setup:** `python3.13 -m venv backend/venv && backend/venv/bin/pip install -r backend/requirements-dev.txt`
 - **Package Lambda Zip:** `cd backend && ./build.sh` (Generates Linux C-extensions `manylinux2014_x86_64`)
 
 ## Code Style & Architectural Constraints
