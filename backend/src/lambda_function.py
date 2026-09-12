@@ -12,6 +12,7 @@ from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable
 from youtube_transcript_api.proxies import GenericProxyConfig
 from openai import OpenAI
 from openai import RateLimitError, APITimeoutError, BadRequestError
+from src import config
 
 # Initialize logger
 logger = logging.getLogger()
@@ -20,10 +21,6 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 ssm = boto3.client('ssm')
-
-YOUTUBE_SUMMARIES_TABLE = os.environ.get("DYNAMODB_TABLE", "youtube-summaries")
-USER_SUBMISSIONS_TABLE = os.environ.get("USER_SUBMISSIONS_TABLE", "user-submissions")
-SSM_PARAM_NAME = os.environ.get("SSM_PARAM_NAME", "/youtube-summarizer/openai-api-key")
 
 # Cache OpenAI client across warm Lambda invocations
 openai_client = None
@@ -34,7 +31,7 @@ def get_openai_client():
     if not openai_client:
         try:
             response = ssm.get_parameter(
-                Name=SSM_PARAM_NAME,
+                Name=config.SSM_PARAM_NAME,
                 WithDecryption=True
             )
             api_key = response['Parameter']['Value']
@@ -75,7 +72,7 @@ def format_prompt_v2(content):
             """
 
 def _get_proxy_pool():
-    pool_env = os.environ.get("PROXY_POOL_URLS") or os.environ.get("PROXY_URL")
+    pool_env = config.PROXY_POOL_URLS
     if not pool_env:
         return [None]
     proxies = [p.strip() for p in pool_env.split(",") if p.strip()]
@@ -122,7 +119,7 @@ def get_transcript(video_id):
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
     try:
-        table = dynamodb.Table(YOUTUBE_SUMMARIES_TABLE)
+        table = dynamodb.Table(config.YOUTUBE_SUMMARIES_TABLE)
         response = table.get_item(Key={'video_id': video_id})
         if 'Item' in response:
             return response['Item'].get('summary')
@@ -133,7 +130,7 @@ def check_cache(video_id):
 def save_to_cache(video_id, summary):
     """Saves the generated summary to DynamoDB."""
     try:
-        table = dynamodb.Table(YOUTUBE_SUMMARIES_TABLE)
+        table = dynamodb.Table(config.YOUTUBE_SUMMARIES_TABLE)
         table.put_item(
             Item={
                 'video_id': video_id,
@@ -146,7 +143,7 @@ def save_to_cache(video_id, summary):
 def record_user_submission(user_id, video_id):
     """Records mapping between user_id and video_id in user-submissions table."""
     try:
-        table = dynamodb.Table(USER_SUBMISSIONS_TABLE)
+        table = dynamodb.Table(config.USER_SUBMISSIONS_TABLE)
         table.put_item(
             Item={
                 'user_id': user_id,
@@ -163,18 +160,14 @@ def summarise(content):
     if not client:
         return None, "OpenAI client is not initialized. Check SSM configuration.", 502
 
-    engine = "gpt-4o-mini"
-    max_tokens = 1000
-    temperature = 0.7
-
     prompt = format_prompt_v2(content)
 
     try:
         completion = client.chat.completions.create(
-            model=engine,
+            model=config.LLM_MODEL,
             messages=[{"role": "user", "content": prompt}],
-            temperature=temperature,
-            max_tokens=max_tokens,
+            temperature=config.LLM_TEMPERATURE,
+            max_tokens=config.LLM_MAX_TOKENS,
             n=1
         )
         return completion.choices[0].message.content, None, None
@@ -199,7 +192,7 @@ def lambda_handler(event, context):
             logger.warning("Unauthorized access attempt: Missing or invalid user claims.")
             return {
                 'statusCode': 401,
-                'headers': {'Access-Control-Allow-Origin': '*'},
+                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
                 'body': json.dumps({'error': 'Unauthorized user token.'})
             }
 
@@ -214,7 +207,7 @@ def lambda_handler(event, context):
             logger.warning(f"URL validation failed for input: {youtube_url}")
             return {
                 'statusCode': 400,
-                'headers': {'Access-Control-Allow-Origin': '*'},
+                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
                 'body': json.dumps({'error': 'Invalid or missing YouTube URL.'})
             }
 
@@ -230,7 +223,7 @@ def lambda_handler(event, context):
             logger.info("Cache hit. Returning cached summary.")
             return {
                 'statusCode': 200,
-                'headers': {'Access-Control-Allow-Origin': '*'},
+                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
                 'body': json.dumps({'summary': cached_summary, 'source': 'cache'})
             }
 
@@ -243,7 +236,7 @@ def lambda_handler(event, context):
             logger.error(f"Transcript fetch failed: {error}")
             return {
                 'statusCode': error_status,
-                'headers': {'Access-Control-Allow-Origin': '*'},
+                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
                 'body': json.dumps({'error': error})
             }
 
@@ -256,7 +249,7 @@ def lambda_handler(event, context):
             logger.error(f"OpenAI API failed: {llm_error}")
             return {
                 'statusCode': llm_status,
-                'headers': {'Access-Control-Allow-Origin': '*'},
+                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
                 'body': json.dumps({'error': llm_error})
             }
 
@@ -265,7 +258,7 @@ def lambda_handler(event, context):
 
         return {
             'statusCode': 200,
-            'headers': {'Access-Control-Allow-Origin': '*'},
+            'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
             'body': json.dumps({'summary': summary, 'source': 'llm'})
         }
 
@@ -273,6 +266,6 @@ def lambda_handler(event, context):
         logger.exception("An unexpected error occurred during Lambda execution.")
         return {
             'statusCode': 500,
-            'headers': {'Access-Control-Allow-Origin': '*'},
+            'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
             'body': json.dumps({'error': "Internal server error."})
         }

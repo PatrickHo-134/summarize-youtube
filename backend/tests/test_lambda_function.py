@@ -150,7 +150,7 @@ def test_get_transcript_no_transcript_found(mock_ytt_class):
 def test_get_transcript_all_proxies_exhausted(mock_ytt_class, mock_sleep):
     mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
 
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080,http://proxy2:8080"}):
+    with patch('src.config.PROXY_POOL_URLS', "http://proxy1:8080,http://proxy2:8080"):
         content, error, status = get_transcript("abc123")
 
     assert content is None
@@ -172,7 +172,7 @@ def test_get_transcript_succeeds_on_second_proxy(mock_ytt_class, mock_sleep):
 
     mock_ytt_class.side_effect = [failing_instance, success_instance]
 
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080,http://proxy2:8080"}):
+    with patch('src.config.PROXY_POOL_URLS', "http://proxy1:8080,http://proxy2:8080"):
         content, error, status = get_transcript("abc123")
 
     assert error is None
@@ -187,7 +187,7 @@ def test_get_transcript_retries_all_proxies_before_exhaustion(mock_ytt_class, mo
     mock_ytt_class.return_value.fetch.side_effect = Exception("Blocked")
 
     pool = "http://p1:8080,http://p2:8080,http://p3:8080"
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+    with patch('src.config.PROXY_POOL_URLS', pool):
         content, error, status = get_transcript("abc123")
 
     assert status == 429
@@ -200,7 +200,7 @@ def test_get_transcript_retries_all_proxies_before_exhaustion(mock_ytt_class, mo
 def test_get_transcript_no_sleep_on_first_attempt(mock_ytt_class, mock_sleep):
     mock_ytt_class.return_value.fetch.side_effect = Exception("Blocked")
 
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": "http://proxy1:8080"}):
+    with patch('src.config.PROXY_POOL_URLS', "http://proxy1:8080"):
         get_transcript("abc123")
 
     mock_sleep.assert_not_called()
@@ -215,7 +215,7 @@ def test_lambda_handler_all_proxies_fail_returns_429(mock_ytt_class, mock_sleep,
     mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
 
     pool = "http://p1:8080,http://p2:8080"
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+    with patch('src.config.PROXY_POOL_URLS', pool):
         response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
 
     assert response["statusCode"] == 429
@@ -234,7 +234,7 @@ def test_non_retryable_error_bypasses_proxy_rotation(mock_ytt_class, mock_sleep)
     mock_ytt_class.side_effect = [proxy1_instance, proxy2_instance]
 
     pool = "http://p1:8080,http://p2:8080"
-    with patch.dict(os.environ, {"PROXY_POOL_URLS": pool}):
+    with patch('src.config.PROXY_POOL_URLS', pool):
         content, error, status = get_transcript("abc123")
 
     assert content is None
