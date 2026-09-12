@@ -129,7 +129,24 @@ chmod +x deploy-frontend.sh
 
 This script compiles production assets (npm run build), syncs the dist/ directory to S3, and invalidates the CloudFront CDN cache.
 
-### 2\. Backend Lambda Build & Deployment
+### 2\. Backend Unit Tests
+
+#### First-time setup (creates venv and installs dev dependencies)
+
+```bash
+python3.13 -m venv backend/venv
+backend/venv/bin/pip install -r backend/requirements-dev.txt
+```
+
+#### Run tests
+
+```bash
+backend/venv/bin/python -m pytest backend/tests/test_lambda_function.py -v
+```
+
+---
+
+### 3\. Backend Lambda Build & Deployment
 
 #### Package for AWS Lambda
 
