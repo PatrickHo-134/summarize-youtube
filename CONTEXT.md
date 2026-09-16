@@ -4,7 +4,11 @@
 
 - **Goal:** Serverless full-stack web application that accepts a YouTube URL, fetches the transcript, generates a summary via OpenAI (GPT-4o-mini), and caches results in DynamoDB. The system now utilizes Amazon Cognito User Pools for identity management, providing secure JWT-based authentication.
 - **Monorepo Structure:** Clean separation between isolated serverless backend service (`/backend`) and modern React UI (`/frontend`).
-- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`. It uses AWS Amplify v6 and the `@aws-amplify/ui-react` library to handle sign-up, login, and token management via modal overlays. Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
+- **Frontend Stack:**
+  - React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
+  - Uses AWS Amplify v6 and `@aws-amplify/ui-react` for auth modal overlays.
+  - Features tabbed navigation between the central URL summarizer landing hero and a personal "Saved Summaries" dashboard library (`HistoryList`).
+  - Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
 - **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API (`POST /summarize`). The API is strictly protected by a Cognito User Pool Authorizer.
 - **Storage & Config:** DynamoDB (`youtube-summaries` table for caching, and a new `user-submissions` mapping table). AWS SSM Parameter Store stores the OpenAI API Key securely. Lambda Environment Variables include `PROXY_URL` and `USER_SUBMISSIONS_TABLE`.
 
@@ -24,11 +28,11 @@ SUMMARIZE-YOUTUBE/
 │   ├── .env.local            # Local development frontend configuration
 │   ├── .env.production       # Static build configuration for CI/CD or deployment
 │   ├── src/
-│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx, AuthModal.tsx
+│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx, AuthModal.tsx, Navbar.tsx, Dashboard.tsx, SummaryCard.tsx, HistoryList.tsx
 │   │   ├── hooks/            # useSummarize.ts (API state, auth checks, & retry management)
 │   │   ├── services/         # auth.ts (Token fetching and auth state helpers)
-│   │   ├── types/            # index.ts (FetchStatus, SummarizeResponse)
-│   │   ├── App.tsx           # Main application shell
+│   │   ├── types/            # index.ts (FetchStatus, SummarizeResponse, HistoryItem)
+│   │   ├── App.tsx           # Main application shell & tab router ('new' | 'dashboard')
 │   │   └── main.tsx
 │   ├── package.json
 │   └── vite.config.ts
@@ -126,3 +130,9 @@ cd package && zip -r ../deployment.zip . && cd ..
 - **Problem:** Legacy single `index.html` rendered raw unformatted Markdown string output without interactive retry or mailing options.
 
 - **Fix:** Migrated to React/TypeScript inside `/frontend`. Utilized `react-markdown` for structured HTML rendering, added a cache hit indicator badge, implemented a `mailto:` email summary trigger, and created a retry action button on API failure.
+
+### 5.5 Minimalist UI Redesign & Dashboard Library (`HistoryList`)
+
+-   **Problem:** The interface lacked structured navigation and a dedicated library view to explore previously summarized videos.
+
+-   **Fix:** Redesigned the UI using Tailwind CSS v4 and `lucide-react`. Built `Navbar.tsx` for seamless tab switching ("New Summary" vs "Dashboard"), updated `UrlForm.tsx` with a centered pill-style input hero section, and created `HistoryList.tsx` to render saved summaries as structured cards with date badges and "Newest/Oldest first" sorting.
