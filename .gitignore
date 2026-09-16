@@ -210,6 +210,7 @@ __marimo__/
 # Backend
 backend/package/
 backend/deployment.zip
+backend/get_history/deployment.zip
 
 # Frontend
 frontend/node_modules/

@@ -15,15 +15,18 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 [ CloudFront CDN ] ──► [ S3 Bucket (Vite + React + TS Static Build) ]
        │
        ▼ (REST API Call + JWT Bearer Token)
-[ AWS API Gateway ] (/summarize with Cognito Authorizer)
+[ AWS API Gateway ] (/summarize & /history with Cognito Authorizer)
        │
-       ▼
-[ AWS Lambda (Python 3.13) ]
-       ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
-       ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
-       ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
-       ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
-       └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
+       ├──► [ AWS Lambda: youtube-summarizer (Python 3.13) ]
+       │           ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
+       │           ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
+       │           ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
+       │           ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
+       │           └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
+       │
+       └──► [ AWS Lambda: get-history (Python 3.13) ]
+                   ├──► [ DynamoDB: users ]     (Read Ownership Mapping)
+                   └──► [ DynamoDB: summaries ] (Read Cached Summaries)
 ```
 
 ### Tech Stack
@@ -31,7 +34,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
 - **Authentication:** Amazon Cognito User Pools mapped via the AWS Amplify v6 `@aws-amplify/ui-react` SDK.
 - **Hosting & Distribution:** Amazon S3 (Private Bucket) + CloudFront CDN with Origin Access Control (OAC).
-- **API Gateway:** REST API (`POST /summarize`) secured via Cognito Authorizer with CORS enabled.
+- **API Gateway:** REST API (`POST /summarize` and `GET /history`) secured via Cognito Authorizer with CORS enabled.
 - **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
 - **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables) and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
 - **External Integrations:** `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig`, OpenAI API (`gpt-4o-mini`), DataImpulse Residential Proxy.
@@ -56,11 +59,16 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 ```
 SUMMARIZE-YOUTUBE/
 ├── backend/                  # Isolated Python Lambda Service
-│   ├── src/                  # Lambda handler & business logic
-│   ├── tests/                # Unit & integration tests
+│   ├── src/                  # Lambda handler & business logic (youtube-summarizer)
+│   ├── tests/                # Unit & integration tests (youtube-summarizer)
 │   ├── build.sh              # Cross-platform Linux packaging script
 │   ├── requirements.txt      # Production dependencies
-│   └── requirements-dev.txt  # Development dependencies
+│   ├── requirements-dev.txt  # Development dependencies
+│   └── get_history/          # Standalone Lambda for GET /history
+│       ├── src/              # lambda_function.py
+│       ├── tests/            # Pytest unit tests
+│       ├── build.sh          # Packaging script (no native deps)
+│       └── requirements.txt  # Production dependencies (boto3)
 ├── frontend/                 # Vite + React + TypeScript App
 │   ├── .env.local            # Local development config variables
 │   ├── src/
@@ -97,6 +105,8 @@ SUMMARIZE-YOUTUBE/
 | `DYNAMODB_TABLE` | DynamoDB table name for cached summaries           | `youtube-summaries`                           |
 | `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key        | `/youtube-summarizer/openai-api-key` |
 | `USER_SUBMISSIONS_TABLE` | Mapping table for user authentication limits | `user-submissions` |
+| `YOUTUBE_SUMMARIES_TABLE` | DynamoDB table name for cached summaries (get-history) | `youtube-summaries` |
+| `CORS_ALLOW_ORIGIN` | Allowed origin for CORS headers (get-history) | `*` |
 
 ---
 
@@ -143,7 +153,11 @@ backend/venv/bin/pip install -r backend/requirements-dev.txt
 #### Run tests
 
 ```bash
+# youtube-summarizer tests
 backend/venv/bin/python -m pytest backend/tests/test_lambda_function.py -v
+
+# get-history tests
+backend/venv/bin/python -m pytest backend/get_history/tests/test_lambda_function.py -v
 ```
 
 ---
@@ -162,9 +176,19 @@ chmod +x build.sh
 
 This script downloads Linux binaries (`manylinux2014_x86_64`) targeting Python 3.13 and bundles `src/lambda_function.py` into `deployment.zip`.
 
+#### Package `get-history` for AWS Lambda
+
+```bash
+cd backend/get_history
+chmod +x build.sh
+./build.sh
+```
+
+Pure-Python; no cross-compilation needed. Bundles `src/` into `deployment.zip`.
+
 #### Deploy Zip to Lambda
 
-Upload the generated `deployment.zip` to the `youtube-summarizer` function via the AWS Lambda Console or AWS CLI.
+Upload the generated `deployment.zip` to the appropriate Lambda function (`youtube-summarizer` or `get-history`) via the AWS Lambda Console or AWS CLI.
 
 ## 🔍 Troubleshooting & Lessons Learned
 
