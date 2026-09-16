@@ -19,12 +19,13 @@
 ```
 SUMMARIZE-YOUTUBE/
 ├── backend/                  # Isolated Python Lambda Service
-│   ├── src/                  # Lambda source code (lambda_function.py)
-│   ├── tests/                # Pytest unit & integration tests
-│   ├── build.sh              # Cross-platform Linux packaging script
-│   ├── requirements.txt      # Production dependencies (openai, youtube-transcript-api)
-│   ├── requirements-dev.txt  # Local dev/test dependencies
-│   └── get_history/          # Standalone Lambda for history endpoint
+│   ├── summarize/            # youtube-summarizer Lambda
+│   │   ├── src/              # Lambda source code (lambda_function.py)
+│   │   ├── tests/            # Pytest unit & integration tests
+│   │   ├── build.sh          # Cross-platform Linux packaging script
+│   │   ├── requirements.txt  # Production dependencies (openai, youtube-transcript-api)
+│   │   └── requirements-dev.txt  # Local dev/test dependencies
+│   └── get_history/          # get-history Lambda
 │       ├── src/              # lambda_function.py (GET /history handler)
 │       ├── tests/            # Pytest unit tests
 │       ├── build.sh          # Packaging script (no native deps)
@@ -100,7 +101,7 @@ aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --path
 
 ### B. Backend Deployment
 
-#### `youtube-summarizer` Lambda (`backend/build.sh`)
+#### `youtube-summarizer` Lambda (`backend/summarize/build.sh`)
 
 Cross-compiles Linux C-extensions (manylinux2014_x86_64) for Lambda Python 3.13:
 

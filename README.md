@@ -59,12 +59,13 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 ```
 SUMMARIZE-YOUTUBE/
 ├── backend/                  # Isolated Python Lambda Service
-│   ├── src/                  # Lambda handler & business logic (youtube-summarizer)
-│   ├── tests/                # Unit & integration tests (youtube-summarizer)
-│   ├── build.sh              # Cross-platform Linux packaging script
-│   ├── requirements.txt      # Production dependencies
-│   ├── requirements-dev.txt  # Development dependencies
-│   └── get_history/          # Standalone Lambda for GET /history
+│   ├── summarize/            # youtube-summarizer Lambda
+│   │   ├── src/              # Lambda handler & business logic
+│   │   ├── tests/            # Unit & integration tests
+│   │   ├── build.sh          # Cross-platform Linux packaging script
+│   │   ├── requirements.txt  # Production dependencies
+│   │   └── requirements-dev.txt  # Development dependencies
+│   └── get_history/          # get-history Lambda
 │       ├── src/              # lambda_function.py
 │       ├── tests/            # Pytest unit tests
 │       ├── build.sh          # Packaging script (no native deps)
@@ -147,14 +148,14 @@ This script compiles production assets (npm run build), syncs the dist/ director
 
 ```bash
 python3.13 -m venv backend/venv
-backend/venv/bin/pip install -r backend/requirements-dev.txt
+backend/venv/bin/pip install -r backend/summarize/requirements-dev.txt
 ```
 
 #### Run tests
 
 ```bash
 # youtube-summarizer tests
-backend/venv/bin/python -m pytest backend/tests/test_lambda_function.py -v
+backend/venv/bin/python -m pytest backend/summarize/tests/test_lambda_function.py -v
 
 # get-history tests
 backend/venv/bin/python -m pytest backend/get_history/tests/test_lambda_function.py -v
@@ -169,7 +170,7 @@ backend/venv/bin/python -m pytest backend/get_history/tests/test_lambda_function
 Run the cross-platform packaging script inside the `backend/` directory:
 
 ```Bash
-cd backend
+cd backend/summarize
 chmod +x build.sh
 ./build.sh
 ```
