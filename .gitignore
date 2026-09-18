@@ -208,9 +208,11 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Backend
-backend/package/
-backend/deployment.zip
+backend/get_history/package/
 backend/get_history/deployment.zip
+backend/summarize/package/
+backend/summarize/deployment.zip
+backend/package/
 
 # Frontend
 frontend/node_modules/
