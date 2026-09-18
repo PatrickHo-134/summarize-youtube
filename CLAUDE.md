@@ -13,15 +13,17 @@
 - **Deploy Static Site:** `./deploy-frontend.sh`
 
 ### Backend (`/backend`)
-- **Run Tests:** `backend/venv/bin/python -m pytest backend/tests/test_lambda_function.py -v`
-- **First-time venv setup:** `python3.13 -m venv backend/venv && backend/venv/bin/pip install -r backend/requirements-dev.txt`
-- **Package Lambda Zip:** `cd backend && ./build.sh` (Generates Linux C-extensions `manylinux2014_x86_64`)
+- **Run Tests (summarize):** `backend/venv/bin/python -m pytest backend/summarize/tests/test_lambda_function.py -v`
+- **Run Tests (get_history):** `backend/venv/bin/python -m pytest backend/get_history/tests/test_lambda_function.py -v`
+- **First-time venv setup:** `python3.13 -m venv backend/venv && backend/venv/bin/pip install -r backend/summarize/requirements-dev.txt`
+- **Package summarize Lambda Zip:** `cd backend/summarize && ./build.sh` (Generates Linux C-extensions `manylinux2014_x86_64`)
+- **Package get_history Lambda Zip:** `cd backend/get_history && ./build.sh`
 
 ## Code Style & Architectural Constraints
 
 ### Backend (Python 3.13)
 - **Transcript API Syntax:** Always instantiate `YouTubeTranscriptApi()` before calling `.fetch(video_id)` (v1.0.0+ syntax). Do NOT use static `get_transcript()`.
-- **Packaging:** Native dependencies (like `pydantic_core`) must be compiled with `--platform manylinux2014_x86_64` for Lambda compatibility (handled via `backend/build.sh`).
+- **Packaging:** Native dependencies (like `pydantic_core`) must be compiled with `--platform manylinux2014_x86_64` for Lambda compatibility (handled via `backend/summarize/build.sh`). `backend/get_history/build.sh` requires no cross-compilation (pure-Python).
 - **Proxy Routing:** External YouTube calls must route through residential proxies using `GenericProxyConfig` via `PROXY_URL`.
 
 ### Frontend (TypeScript / React)

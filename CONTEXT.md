@@ -4,8 +4,12 @@
 
 - **Goal:** Serverless full-stack web application that accepts a YouTube URL, fetches the transcript, generates a summary via OpenAI (GPT-4o-mini), and caches results in DynamoDB. The system now utilizes Amazon Cognito User Pools for identity management, providing secure JWT-based authentication.
 - **Monorepo Structure:** Clean separation between isolated serverless backend service (`/backend`) and modern React UI (`/frontend`).
-- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`. It uses AWS Amplify v6 and the `@aws-amplify/ui-react` library to handle sign-up, login, and token management via modal overlays. Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
-- **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API (`POST /summarize`). The API is strictly protected by a Cognito User Pool Authorizer.
+- **Frontend Stack:**
+  - React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
+  - Uses AWS Amplify v6 and `@aws-amplify/ui-react` for auth modal overlays.
+  - Features tabbed navigation between the central URL summarizer landing hero and a personal "Saved Summaries" dashboard library (`HistoryList`).
+  - Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
+- **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API. Two Lambda functions: `youtube-summarizer` (`POST /summarize`) and `get-history` (`GET /history`). Both APIs are strictly protected by a Cognito User Pool Authorizer.
 - **Storage & Config:** DynamoDB (`youtube-summaries` table for caching, and a new `user-submissions` mapping table). AWS SSM Parameter Store stores the OpenAI API Key securely. Lambda Environment Variables include `PROXY_URL` and `USER_SUBMISSIONS_TABLE`.
 
 ---
@@ -15,20 +19,26 @@
 ```
 SUMMARIZE-YOUTUBE/
 ├── backend/                  # Isolated Python Lambda Service
-│   ├── src/                  # Lambda source code (lambda_function.py)
-│   ├── tests/                # Pytest unit & integration tests
-│   ├── build.sh              # Cross-platform Linux packaging script
-│   ├── requirements.txt      # Production dependencies (openai, youtube-transcript-api)
-│   └── requirements-dev.txt  # Local dev/test dependencies
+│   ├── summarize/            # youtube-summarizer Lambda
+│   │   ├── src/              # Lambda source code (lambda_function.py)
+│   │   ├── tests/            # Pytest unit & integration tests
+│   │   ├── build.sh          # Cross-platform Linux packaging script
+│   │   ├── requirements.txt  # Production dependencies (openai, youtube-transcript-api)
+│   │   └── requirements-dev.txt  # Local dev/test dependencies
+│   └── get_history/          # get-history Lambda
+│       ├── src/              # lambda_function.py (GET /history handler)
+│       ├── tests/            # Pytest unit tests
+│       ├── build.sh          # Packaging script (no native deps)
+│       └── requirements.txt  # Production dependencies (boto3)
 ├── frontend/                 # Vite + React + TypeScript Frontend
 │   ├── .env.local            # Local development frontend configuration
 │   ├── .env.production       # Static build configuration for CI/CD or deployment
 │   ├── src/
-│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx, AuthModal.tsx
+│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, ActionControls.tsx, AuthModal.tsx, Navbar.tsx, Dashboard.tsx, SummaryCard.tsx, HistoryList.tsx
 │   │   ├── hooks/            # useSummarize.ts (API state, auth checks, & retry management)
 │   │   ├── services/         # auth.ts (Token fetching and auth state helpers)
-│   │   ├── types/            # index.ts (FetchStatus, SummarizeResponse)
-│   │   ├── App.tsx           # Main application shell
+│   │   ├── types/            # index.ts (FetchStatus, SummarizeResponse, HistoryItem)
+│   │   ├── App.tsx           # Main application shell & tab router ('new' | 'dashboard')
 │   │   └── main.tsx
 │   ├── package.json
 │   └── vite.config.ts
@@ -56,6 +66,14 @@ SUMMARIZE-YOUTUBE/
   - Timeout: 30 seconds
   - Authorization Extraction: Extracts the authenticated user's unique identifier (`sub` claim) passed securely from API Gateway to enforce data ownership
   - IAM Roles: `AmazonDynamoDBFullAccess`, `AmazonSSMReadOnlyAccess`
+- **Lambda Function:** `get-history`
+  - Runtime: **Python 3.13** (`x86_64`)
+  - Timeout: 30 seconds
+  - Triggered by: `GET /history` on the same API Gateway, protected by the same Cognito Authorizer
+  - Logic: Queries `user-submissions` by `user_id` (`sub` claim), batch-fetches `title` and `summary` from `youtube-summaries`, and returns items sorted newest-first
+  - IAM Roles: `AmazonDynamoDBFullAccess`
+  - Environment Variables: `USER_SUBMISSIONS_TABLE`, `YOUTUBE_SUMMARIES_TABLE`, `CORS_ALLOW_ORIGIN`
+  - Packaging: `backend/get_history/build.sh` (pure-Python, no cross-compilation needed)
 - **DynamoDB Tables:**
     *   `youtube-summaries` (Partition Key: `video_id`): Preserves global LLM caching to prevent duplicate OpenAI and proxy costs
     *   `user-submissions` (Partition Key: `user_id`, Sort Key: `video_id`): Enforces content ownership and provides intrinsic support for future user history features
@@ -81,7 +99,9 @@ aws s3 sync dist/ "s3://${S3_BUCKET}" --delete
 aws cloudfront create-invalidation --distribution-id "${DISTRIBUTION_ID}" --paths "/*"
 ```
 
-### B. Backend Deployment (`backend/build.sh`)
+### B. Backend Deployment
+
+#### `youtube-summarizer` Lambda (`backend/summarize/build.sh`)
 
 Cross-compiles Linux C-extensions (manylinux2014_x86_64) for Lambda Python 3.13:
 
@@ -99,6 +119,16 @@ pip install \
   youtube-transcript-api openai
 cp src/lambda_function.py package/
 cd package && zip -r ../deployment.zip . && cd ..
+```
+
+#### `get-history` Lambda (`backend/get_history/build.sh`)
+
+Pure-Python; no cross-compilation required. Packages `src/` directly into `deployment.zip`:
+
+```bash
+cd backend/get_history
+chmod +x build.sh
+./build.sh
 ```
 
 ## 5\. Key Issues Resolved & Solutions
@@ -126,3 +156,16 @@ cd package && zip -r ../deployment.zip . && cd ..
 - **Problem:** Legacy single `index.html` rendered raw unformatted Markdown string output without interactive retry or mailing options.
 
 - **Fix:** Migrated to React/TypeScript inside `/frontend`. Utilized `react-markdown` for structured HTML rendering, added a cache hit indicator badge, implemented a `mailto:` email summary trigger, and created a retry action button on API failure.
+
+### 5.5 Minimalist UI Redesign & Dashboard Library (`HistoryList`)
+
+-   **Problem:** The interface lacked structured navigation and a dedicated library view to explore previously summarized videos.
+
+-   **Fix:** Redesigned the UI using Tailwind CSS v4 and `lucide-react`. Built `Navbar.tsx` for seamless tab switching ("New Summary" vs "Dashboard"), updated `UrlForm.tsx` with a centered pill-style input hero section, and created `HistoryList.tsx` to render saved summaries as structured cards with date badges and "Newest/Oldest first" sorting.
+
+
+### 5.6 History Page — Dedicated `get-history` Lambda
+
+-   **Problem:** The Dashboard (`HistoryList`) needed a dedicated backend endpoint to retrieve a user's previously summarized videos, joining data across two DynamoDB tables (`user-submissions` and `youtube-summaries`).
+
+-   **Fix:** Created a standalone Lambda function (`backend/get_history/`) that authenticates via the `sub` Cognito claim, queries `user-submissions` by `user_id`, batch-fetches `video_id`, `title`, and `summary` from `youtube-summaries`, and returns a CORS-safe JSON response sorted newest-first. The function has its own `build.sh` (no native deps) and Pytest test suite.
