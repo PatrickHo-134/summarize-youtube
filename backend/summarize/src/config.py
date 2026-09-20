@@ -21,3 +21,4 @@ LLM_TEMPERATURE: float = float(_optional("LLM_TEMPERATURE", "0.7"))
 # these configs are stored in lambda environment variables
 PROXY_POOL_URLS: str = _optional("PROXY_POOL_URLS") or _optional("PROXY_URL")
 SSM_PARAM_NAME: str = _require("SSM_PARAM_NAME")
+TRANSCRIPT_BUCKET: str = _optional("TRANSCRIPT_BUCKET")
