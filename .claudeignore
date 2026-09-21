@@ -1,14 +1,54 @@
-# Dependencies
+# ==========================================
+# Dependencies & Virtual Environments
+# ==========================================
 frontend/node_modules/
-backend/package/
+backend/venv/
+venv/
 .venv/
-__pycache__/
-
-# Build Outputs
-frontend/dist/
-backend/deployment.zip
-
-# Environment & Temp Files
-.env
 .env.local
+
+# ==========================================
+# Build & Packaging Artifacts (Lambda & Vite)
+# ==========================================
+backend/summarize/package/
+backend/summarize/deployment.zip
+backend/get_history/package/
+backend/get_history/deployment.zip
+backend/package/
+frontend/build/
+*.zip
+
+# ==========================================
+# Large Lockfiles & Generated Assets
+# ==========================================
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+frontend/dist/
+
+# ==========================================
+# Python & Test Caches / Coverage Reports
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+backend/.pytest_cache/
+.coverage
+htmlcov/
+.nox/
+.tox/
+
+# ==========================================
+# Vite, IDE & OS Metadata
+# ==========================================
+frontend/.vite/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
 *.log
+
+# Documents
+docs/
+aws/
+LICENSE
