@@ -2,8 +2,8 @@
 
 ## Architecture & Monorepo Overview
 - Monorepo containing `/backend` (AWS Lambda Python 3.13) and `/frontend` (Vite + React 18 + TS).
-- **Backend Stack:** Python 3.13, Pytest, OpenAI API (`gpt-4o-mini`), `youtube-transcript-api` (v1.0.0+), DynamoDB (`youtube-summaries`), Amazon S3 (raw transcript cache), SSM Parameter Store[cite: 6].
-- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons` (`FaYoutube`), `lucide-react`[cite: 6].
+- **Backend Stack:** Python 3.13, Pytest, OpenAI API (`gpt-4o-mini`), `youtube-transcript-api` (v1.0.0+), DynamoDB (`youtube-summaries`), Amazon S3 (raw transcript cache), SSM Parameter Store.
+- **Frontend Stack:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons` (`FaYoutube`), `lucide-react`.
 
 ## Common Commands
 
@@ -22,9 +22,9 @@
 ## Code Style & Architectural Constraints
 
 ### Backend (Python 3.13)
-- **Transcript API Syntax:** Always instantiate `YouTubeTranscriptApi()` before calling `.fetch(video_id)` (v1.0.0+ syntax)[cite: 6]. Do NOT use static `get_transcript()`[cite: 6].
-- **Packaging:** Native dependencies (like `pydantic_core`) must be compiled with `--platform manylinux2014_x86_64` for Lambda compatibility (handled via `backend/summarize/build.sh`)[cite: 6]. `backend/get_history/build.sh` requires no cross-compilation (pure-Python)[cite: 6].
-- **Proxy Routing:** External YouTube calls must route through residential proxies using `GenericProxyConfig` via `PROXY_URL`[cite: 6].
+- **Transcript API Syntax:** Always instantiate `YouTubeTranscriptApi()` before calling `.fetch(video_id)` (v1.0.0+ syntax). Do NOT use static `get_transcript()`.
+- **Packaging:** Native dependencies (like `pydantic_core`) must be compiled with `--platform manylinux2014_x86_64` for Lambda compatibility (handled via `backend/summarize/build.sh`). `backend/get_history/build.sh` requires no cross-compilation (pure-Python).
+- **Proxy Routing:** External YouTube calls must route through residential proxies using `GenericProxyConfig` via `PROXY_URL`.
 - **Storage Constraints:** DynamoDB enforces a strict 400KB item limit. Raw transcripts must be stored in S3 (`TRANSCRIPT_BUCKET`) using a non-blocking, fire-and-forget upload pattern to prevent blocking the user if the S3 upload fails. DynamoDB is reserved for caching the shorter generated summaries.
 
 ### Frontend (TypeScript / React)
