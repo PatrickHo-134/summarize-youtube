@@ -21,6 +21,7 @@ logger.setLevel(logging.INFO)
 # Initialize AWS clients
 dynamodb = boto3.resource('dynamodb')
 ssm = boto3.client('ssm')
+s3 = boto3.client('s3')
 
 # Cache OpenAI client across warm Lambda invocations
 openai_client = None
@@ -102,19 +103,19 @@ def get_transcript(video_id):
             fetched_transcript = ytt_api.fetch(video_id)
             transcript_list = fetched_transcript.to_raw_data()
             full_content = " ".join(snippet['text'] for snippet in transcript_list)
-            return full_content, None, None
+            return full_content, transcript_list, None, None
 
         except VideoUnavailable:
-            return None, "This video is unavailable (deleted, private, or region-blocked).", 400
+            return None, None, "This video is unavailable (deleted, private, or region-blocked).", 400
         except TranscriptsDisabled:
-            return None, "Transcripts are disabled for this video.", 400
+            return None, None, "Transcripts are disabled for this video.", 400
         except NoTranscriptFound:
-            return None, "No transcript found for this video in any language.", 400
+            return None, None, "No transcript found for this video in any language.", 400
         except Exception as e:
             last_error = str(e)
             logger.warning(f"Transcript fetch failed with proxy '{proxy_url}': {last_error}")
 
-    return None, f"All proxies exhausted. Last error: {last_error}", 429
+    return None, None, f"All proxies exhausted. Last error: {last_error}", 429
 
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
@@ -139,6 +140,32 @@ def save_to_cache(video_id, summary):
         )
     except ClientError as e:
         logger.error(f"DynamoDB write error (youtube-summaries): {e.response['Error']['Message']}")
+
+def upload_transcript_to_s3(video_id, raw_transcript):
+    """Uploads the raw transcript payload to S3 without blocking the main execution."""
+    if not getattr(config, 'TRANSCRIPT_BUCKET', None):
+        logger.warning("TRANSCRIPT_BUCKET not configured. Skipping S3 upload.")
+        return
+
+    try:
+        payload = {
+            "video_id": video_id,
+            "fetched_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+            "language": "en",
+            "transcript": raw_transcript
+        }
+
+        s3_key = f"transcripts/{video_id}.json"
+
+        s3.put_object(
+            Bucket=config.TRANSCRIPT_BUCKET,
+            Key=s3_key,
+            Body=json.dumps(payload),
+            ContentType="application/json"
+        )
+        logger.info(f"Successfully uploaded raw transcript to s3://{config.TRANSCRIPT_BUCKET}/{s3_key}")
+    except Exception as e:
+        logger.error(f"S3 Upload failed for {video_id}: {str(e)}. Proceeding to LLM summarization")
 
 def record_user_submission(user_id, video_id):
     """Records mapping between user_id and video_id in user-submissions table."""
@@ -231,7 +258,7 @@ def lambda_handler(event, context):
         proxy_configured = bool(os.environ.get('PROXY_URL'))
         logger.info(f"Cache miss. Fetching transcript... (Proxy Configured: {proxy_configured})")
 
-        transcript, error, error_status = get_transcript(video_id)
+        transcript, raw_transcript, error, error_status = get_transcript(video_id)
         if error:
             logger.error(f"Transcript fetch failed: {error}")
             return {
@@ -241,6 +268,8 @@ def lambda_handler(event, context):
             }
 
         logger.info(f"Transcript fetched successfully. Length: {len(transcript)} characters.")
+
+        upload_transcript_to_s3(video_id, raw_transcript)
 
         # Log the LLM execution (Another common timeout point)
         logger.info("Sending transcript to OpenAI...")

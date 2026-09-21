@@ -78,9 +78,11 @@ def test_lambda_handler_cache_hit(mock_check_cache, mock_record):
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
 @patch('src.lambda_function.save_to_cache')
-def test_lambda_handler_cache_miss_success(mock_save, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+@patch('src.lambda_function.upload_transcript_to_s3')
+def test_lambda_handler_cache_miss_success(mock_upload, mock_save, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
-    mock_get_transcript.return_value = ("Full transcript content", None, None)
+    raw_transcript_data = [{"text": "Full transcript content"}]
+    mock_get_transcript.return_value = ("Full transcript content", raw_transcript_data, None, None)
     mock_summarise.return_value = ("New AI summary", None, None)
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
@@ -92,6 +94,7 @@ def test_lambda_handler_cache_miss_success(mock_save, mock_summarise, mock_get_t
 
     mock_check_cache.assert_called_once_with("12345678901")
     mock_get_transcript.assert_called_once_with("12345678901")
+    mock_upload.assert_called_once_with("12345678901", raw_transcript_data)
     mock_summarise.assert_called_once_with("Full transcript content")
     mock_save.assert_called_once_with("12345678901", "New AI summary")
 
@@ -99,15 +102,17 @@ def test_lambda_handler_cache_miss_success(mock_save, mock_summarise, mock_get_t
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
 @patch('src.lambda_function.get_transcript')
-def test_lambda_handler_transcript_disabled(mock_get_transcript, mock_check_cache, mock_record):
+@patch('src.lambda_function.upload_transcript_to_s3')
+def test_lambda_handler_transcript_disabled(mock_upload, mock_get_transcript, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
-    mock_get_transcript.return_value = (None, "Transcripts are disabled for this video.", 400)
+    mock_get_transcript.return_value = (None, None, "Transcripts are disabled for this video.", 400)
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
 
     assert response["statusCode"] == 400
     body = json.loads(response["body"])
     assert "Transcripts are disabled" in body["error"]
+    mock_upload.assert_not_called() # ensure S3 is not called on failure
 
 
 # --- YouTube Exception Tests (get_transcript isolation) ---
@@ -116,9 +121,10 @@ def test_lambda_handler_transcript_disabled(mock_get_transcript, mock_check_cach
 def test_get_transcript_video_unavailable(mock_ytt_class):
     mock_ytt_class.return_value.fetch.side_effect = VideoUnavailable("abc123")
 
-    content, error, status = get_transcript("abc123")
+    content, raw_data, error, status = get_transcript("abc123")
 
     assert content is None
+    assert raw_data is None
     assert status == 400
     assert "unavailable" in error.lower()
 
@@ -127,9 +133,10 @@ def test_get_transcript_video_unavailable(mock_ytt_class):
 def test_get_transcript_transcripts_disabled(mock_ytt_class):
     mock_ytt_class.return_value.fetch.side_effect = TranscriptsDisabled("abc123")
 
-    content, error, status = get_transcript("abc123")
+    content, raw_data, error, status = get_transcript("abc123")
 
     assert content is None
+    assert raw_data is None
     assert status == 400
     assert "disabled" in error.lower()
 
@@ -138,9 +145,10 @@ def test_get_transcript_transcripts_disabled(mock_ytt_class):
 def test_get_transcript_no_transcript_found(mock_ytt_class):
     mock_ytt_class.return_value.fetch.side_effect = NoTranscriptFound("abc123", [], {})
 
-    content, error, status = get_transcript("abc123")
+    content, raw_data, error, status = get_transcript("abc123")
 
     assert content is None
+    assert raw_data is None
     assert status == 400
     assert "no transcript" in error.lower()
 
@@ -151,9 +159,10 @@ def test_get_transcript_all_proxies_exhausted(mock_ytt_class, mock_sleep):
     mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
 
     with patch('src.config.PROXY_POOL_URLS', "http://proxy1:8080,http://proxy2:8080"):
-        content, error, status = get_transcript("abc123")
+        content, raw_data, error, status = get_transcript("abc123")
 
     assert content is None
+    assert raw_data is None
     assert status == 429
     assert "proxies exhausted" in error.lower()
     assert mock_sleep.call_count == 1
@@ -173,11 +182,12 @@ def test_get_transcript_succeeds_on_second_proxy(mock_ytt_class, mock_sleep):
     mock_ytt_class.side_effect = [failing_instance, success_instance]
 
     with patch('src.config.PROXY_POOL_URLS', "http://proxy1:8080,http://proxy2:8080"):
-        content, error, status = get_transcript("abc123")
+        content, raw_data, error, status = get_transcript("abc123")
 
     assert error is None
     assert status is None
     assert content == "Hello world"
+    assert raw_data == [{"text": "Hello world"}]
     assert mock_sleep.call_count == 1
 
 
@@ -188,7 +198,7 @@ def test_get_transcript_retries_all_proxies_before_exhaustion(mock_ytt_class, mo
 
     pool = "http://p1:8080,http://p2:8080,http://p3:8080"
     with patch('src.config.PROXY_POOL_URLS', pool):
-        content, error, status = get_transcript("abc123")
+        content, raw_data, error, status = get_transcript("abc123")
 
     assert status == 429
     assert mock_ytt_class.call_count == 3
@@ -235,9 +245,10 @@ def test_non_retryable_error_bypasses_proxy_rotation(mock_ytt_class, mock_sleep)
 
     pool = "http://p1:8080,http://p2:8080"
     with patch('src.config.PROXY_POOL_URLS', pool):
-        content, error, status = get_transcript("abc123")
+        content, raw_data, error, status = get_transcript("abc123")
 
     assert content is None
+    assert raw_data is None
     assert status == 400
     assert "unavailable" in error.lower()
     assert mock_ytt_class.call_count == 1
@@ -313,9 +324,10 @@ def test_summarise_bad_request_other(mock_get_client):
 @patch('src.lambda_function.check_cache')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
-def test_lambda_handler_openai_rate_limit_returns_429(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+@patch('src.lambda_function.upload_transcript_to_s3')
+def test_lambda_handler_openai_rate_limit_returns_429(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
-    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "OpenAI rate limit reached. Please try again in a moment.", 429)
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
@@ -327,9 +339,10 @@ def test_lambda_handler_openai_rate_limit_returns_429(mock_summarise, mock_get_t
 @patch('src.lambda_function.check_cache')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
-def test_lambda_handler_openai_timeout_returns_504(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+@patch('src.lambda_function.upload_transcript_to_s3')
+def test_lambda_handler_openai_timeout_returns_504(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
-    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "OpenAI request timed out. Please try again.", 504)
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
@@ -341,9 +354,10 @@ def test_lambda_handler_openai_timeout_returns_504(mock_summarise, mock_get_tran
 @patch('src.lambda_function.check_cache')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
-def test_lambda_handler_transcript_too_long_returns_400(mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+@patch('src.lambda_function.upload_transcript_to_s3')
+def test_lambda_handler_transcript_too_long_returns_400(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
-    mock_get_transcript.return_value = ("transcript", None, None)
+    mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "This video's transcript is too long to summarize.", 400)
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})

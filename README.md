@@ -21,6 +21,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
        │           ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
        │           ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
        │           ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
+       │           ├──► [ S3: transcripts ]     (Fire-and-Forget Raw Storage)
        │           ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
        │           └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
        │
@@ -36,7 +37,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 - **Hosting & Distribution:** Amazon S3 (Private Bucket) + CloudFront CDN with Origin Access Control (OAC).
 - **API Gateway:** REST API (`POST /summarize` and `GET /history`) secured via Cognito Authorizer with CORS enabled.
 - **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
-- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables) and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
+- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables), Amazon S3 (`youtube-transcripts-cache-<env>` for raw transcripts), and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
 - **External Integrations:** `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig`, OpenAI API (`gpt-4o-mini`), DataImpulse Residential Proxy.
 
 ---
@@ -48,6 +49,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 - **Beautiful Markdown Rendering:** Transforms LLM bullet points and headers into formatted HTML using `react-markdown`.
 - **Cache Hit Indicator:** Real-time visual badge highlighting whether a summary was newly **Generated** via OpenAI or loaded instantly from the **Cached** DynamoDB store.
 - **Cost-Optimized Caching:** Prevents duplicate LLM and proxy API costs by verifying cached video IDs in DynamoDB prior to execution.
+- **Raw Data Retention:** Asynchronously archives raw JSON transcripts into an S3 bucket immediately after fetching. This bypasses DynamoDB's 400KB item limit for long podcasts and creates a permanent data asset for future features (like "Chat with Video") without incurring additional proxy costs.
 - **Error & Retry Handling:** Displays inline error states and provides a **Retry Request** trigger when video transcripts fail or API limits are exceeded.
 - **Email Sharing Action:** Allows users to export video takeaways directly to their default mail client via a single click.
 - **YouTube Cloud IP Bypass:** Bypasses AWS datacenter IP restrictions imposed by YouTube using residential proxy routing.
@@ -106,6 +108,7 @@ SUMMARIZE-YOUTUBE/
 | `DYNAMODB_TABLE` | DynamoDB table name for cached summaries           | `youtube-summaries`                           |
 | `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key        | `/youtube-summarizer/openai-api-key` |
 | `USER_SUBMISSIONS_TABLE` | Mapping table for user authentication limits | `user-submissions` |
+| `TRANSCRIPT_BUCKET` | S3 bucket name for caching raw transcript data | `youtube-transcripts-cache-prod` |
 | `YOUTUBE_SUMMARIES_TABLE` | DynamoDB table name for cached summaries (get-history) | `youtube-summaries` |
 | `CORS_ALLOW_ORIGIN` | Allowed origin for CORS headers (get-history) | `*` |
 
