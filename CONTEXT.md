@@ -10,7 +10,7 @@
   - Features tabbed navigation between the central URL summarizer landing hero and a personal "Saved Summaries" dashboard library (`HistoryList`).
   - Hosted in a private S3 bucket and distributed globally via AWS CloudFront.
 - **Backend Stack:** AWS Lambda running Python 3.13 (`x86_64` / Amazon Linux) triggered by AWS API Gateway REST API. Two Lambda functions: `youtube-summarizer` (`POST /summarize`) and `get-history` (`GET /history`). Both APIs are strictly protected by a Cognito User Pool Authorizer.
-- **Storage & Config:** DynamoDB (`youtube-summaries` table for caching, and a new `user-submissions` mapping table). AWS SSM Parameter Store stores the OpenAI API Key securely. Lambda Environment Variables include `PROXY_URL` and `USER_SUBMISSIONS_TABLE`.
+- **Storage & Config:** DynamoDB (`youtube-summaries` table for fast caching, and `user-submissions` mapping table) and Amazon S3 (private bucket for raw transcript bulk storage). AWS SSM Parameter Store stores the OpenAI API Key securely. Lambda Environment Variables include `PROXY_URL`, `USER_SUBMISSIONS_TABLE`, and `TRANSCRIPT_BUCKET`.
 
 ---
 
@@ -65,7 +65,7 @@ SUMMARIZE-YOUTUBE/
   - Runtime: **Python 3.13** (`x86_64`)
   - Timeout: 30 seconds
   - Authorization Extraction: Extracts the authenticated user's unique identifier (`sub` claim) passed securely from API Gateway to enforce data ownership
-  - IAM Roles: `AmazonDynamoDBFullAccess`, `AmazonSSMReadOnlyAccess`
+  - IAM Roles: `AmazonDynamoDBFullAccess`, `AmazonSSMReadOnlyAccess`, and `s3:PutObject` (targeting the transcript cache bucket)
 - **Lambda Function:** `get-history`
   - Runtime: **Python 3.13** (`x86_64`)
   - Timeout: 30 seconds
@@ -77,6 +77,8 @@ SUMMARIZE-YOUTUBE/
 - **DynamoDB Tables:**
     *   `youtube-summaries` (Partition Key: `video_id`): Preserves global LLM caching to prevent duplicate OpenAI and proxy costs
     *   `user-submissions` (Partition Key: `user_id`, Sort Key: `video_id`): Enforces content ownership and provides intrinsic support for future user history features
+- **S3 Storage:**
+    *   `youtube-transcripts-cache-<env>`: A private bucket that stores the raw JSON transcript payloads (`transcripts/{video_id}.json`) immediately after a successful fetch.
 
 ---
 
@@ -169,3 +171,8 @@ chmod +x build.sh
 -   **Problem:** The Dashboard (`HistoryList`) needed a dedicated backend endpoint to retrieve a user's previously summarized videos, joining data across two DynamoDB tables (`user-submissions` and `youtube-summaries`).
 
 -   **Fix:** Created a standalone Lambda function (`backend/get_history/`) that authenticates via the `sub` Cognito claim, queries `user-submissions` by `user_id`, batch-fetches `video_id`, `title`, and `summary` from `youtube-summaries`, and returns a CORS-safe JSON response sorted newest-first. The function has its own `build.sh` (no native deps) and Pytest test suite.
+
+### 5.7 Raw Transcript Caching & DynamoDB Constraints
+
+- **Problem:** DynamoDB imposes a strict 400 KB maximum item size limit. Storing raw transcripts for long videos (e.g., 2+ hour podcasts) directly in the `youtube-summaries` table risked triggering `ValidationException` errors. Furthermore, lacking a permanent raw data asset required unnecessary re-fetching for future features (like generating different summary lengths).
+- **Fix:** Implemented a hybrid storage strategy. The `youtube-summarizer` Lambda now executes a fire-and-forget S3 upload of the raw transcript JSON to a dedicated bucket (`youtube-transcripts-cache-prod`) immediately after a successful proxy fetch. DynamoDB remains the fast-access cache for the concise OpenAI summaries. If the S3 upload fails (e.g., IAM issue), it logs the error and gracefully proceeds to LLM generation so the end user is not interrupted.
