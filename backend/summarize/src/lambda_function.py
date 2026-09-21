@@ -106,11 +106,11 @@ def get_transcript(video_id):
             return full_content, transcript_list, None, None
 
         except VideoUnavailable:
-            return None, "This video is unavailable (deleted, private, or region-blocked).", 400
+            return None, None, "This video is unavailable (deleted, private, or region-blocked).", 400
         except TranscriptsDisabled:
-            return None, "Transcripts are disabled for this video.", 400
+            return None, None, "Transcripts are disabled for this video.", 400
         except NoTranscriptFound:
-            return None, "No transcript found for this video in any language.", 400
+            return None, None, "No transcript found for this video in any language.", 400
         except Exception as e:
             last_error = str(e)
             logger.warning(f"Transcript fetch failed with proxy '{proxy_url}': {last_error}")
