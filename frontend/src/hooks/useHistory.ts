@@ -5,17 +5,27 @@ import { getAuthToken } from '../services/auth';
 interface UseHistoryResult {
   items: HistoryItem[];
   isLoading: boolean;
+  isLoadingMore: boolean;
+  nextToken: string | null;
   error: string | null;
   fetch: () => Promise<void>;
+  fetchMore: () => Promise<void>;
 }
 
 export function useHistory(): UseHistoryResult {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [nextToken, setNextToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
-    setIsLoading(true);
+  const fetchHistory = useCallback(async (cursor?: string | null) => {
+    const isInitial = !cursor;
+    if (isInitial) {
+      setIsLoading(true);
+    } else {
+      setIsLoadingMore(true);
+    }
     setError(null);
 
     try {
@@ -25,15 +35,18 @@ export function useHistory(): UseHistoryResult {
         return;
       }
 
-      const response = await globalThis.fetch(
-        `${import.meta.env.VITE_API_ENDPOINT}/history`,
-        {
-          method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const url = new URL(`${import.meta.env.VITE_API_ENDPOINT}/history`);
+      url.searchParams.set('limit', '10');
+      if (cursor) {
+        url.searchParams.set('next_token', cursor);
+      }
+
+      const response = await globalThis.fetch(url.toString(), {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
       const json = await response.json();
 
@@ -42,13 +55,26 @@ export function useHistory(): UseHistoryResult {
         return;
       }
 
-      setItems(json.items ?? []);
+      const newItems: HistoryItem[] = json.items ?? [];
+      if (isInitial) {
+        setItems(newItems);
+      } else {
+        setItems((prev) => [...prev, ...newItems]);
+      }
+      setNextToken(json.next_token ?? null);
     } catch {
       setError('Network error: unable to reach the history endpoint.');
     } finally {
-      setIsLoading(false);
+      if (isInitial) {
+        setIsLoading(false);
+      } else {
+        setIsLoadingMore(false);
+      }
     }
   }, []);
 
-  return { items, isLoading, error, fetch };
+  const fetch = useCallback(() => fetchHistory(null), [fetchHistory]);
+  const fetchMore = useCallback(() => fetchHistory(nextToken), [fetchHistory, nextToken]);
+
+  return { items, isLoading, isLoadingMore, nextToken, error, fetch, fetchMore };
 }
