@@ -53,6 +53,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 - **Error & Retry Handling:** Displays inline error states and provides a **Retry Request** trigger when video transcripts fail or API limits are exceeded.
 - **Email Sharing Action:** Allows users to export video takeaways directly to their default mail client via a single click.
 - **YouTube Cloud IP Bypass:** Bypasses AWS datacenter IP restrictions imposed by YouTube using residential proxy routing.
+- **Paginated History Dashboard:** Utilizes DynamoDB cursor-based pagination (`LastEvaluatedKey`) to fetch user history efficiently. The frontend seamlessly handles these cursors via a "Load More" interface, ensuring fast load times and minimal memory consumption even for users with hundreds of saved summaries.
 
 ---
 

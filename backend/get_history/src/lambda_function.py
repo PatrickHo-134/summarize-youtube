@@ -1,6 +1,7 @@
 import os
 import logging
 import json
+import base64
 import boto3
 from botocore.exceptions import ClientError
 
@@ -37,17 +38,33 @@ def extract_user_id(event: dict) -> str | None:
         return None
 
 
-def get_submissions(user_id: str) -> list[dict]:
-    """Query user-submissions table for all records belonging to user_id."""
+def _decode_next_token(token: str) -> dict | None:
+    try:
+        return json.loads(base64.b64decode(token).decode('utf-8'))
+    except Exception as e:
+        logger.warning(f"Failed to decode next_token: {e}")
+        return None
+
+
+def _encode_next_token(key: dict) -> str:
+    return base64.b64encode(json.dumps(key).encode('utf-8')).decode('utf-8')
+
+
+def get_submissions(user_id: str, limit: int, exclusive_start_key: dict | None) -> tuple[list[dict], dict | None]:
+    """Query user-submissions table for a page of records belonging to user_id."""
     table = dynamodb.Table(USER_SUBMISSIONS_TABLE)
     try:
-        response = table.query(
-            KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id)
-        )
-        return response.get('Items', [])
+        kwargs = {
+            'KeyConditionExpression': boto3.dynamodb.conditions.Key('user_id').eq(user_id),
+            'Limit': limit,
+        }
+        if exclusive_start_key:
+            kwargs['ExclusiveStartKey'] = exclusive_start_key
+        response = table.query(**kwargs)
+        return response.get('Items', []), response.get('LastEvaluatedKey')
     except ClientError as e:
         logger.error(f"DynamoDB query error (user-submissions): {e.response['Error']['Message']}")
-        return []
+        return [], None
 
 
 def batch_get_summaries(video_ids: list[str]) -> dict[str, dict]:
@@ -99,9 +116,17 @@ def lambda_handler(event: dict, context) -> dict:
 
     logger.info(f"Fetching history for user_id={user_id}")
 
-    submissions = get_submissions(user_id)
+    query_params = event.get('queryStringParameters') or {}
+    try:
+        limit = min(int(query_params.get('limit', 10)), 50)
+    except (ValueError, TypeError):
+        limit = 10
+    raw_token = query_params.get('next_token')
+    exclusive_start_key = _decode_next_token(raw_token) if raw_token else None
+
+    submissions, last_evaluated_key = get_submissions(user_id, limit, exclusive_start_key)
     if not submissions:
-        return _response(200, {'items': []})
+        return _response(200, {'items': [], 'next_token': None})
 
     video_ids = [s['video_id'] for s in submissions]
     summaries_map = batch_get_summaries(video_ids)
@@ -121,4 +146,6 @@ def lambda_handler(event: dict, context) -> dict:
 
     items.sort(key=lambda x: x['createdAt'], reverse=True)
 
-    return _response(200, {'items': items})
+    next_token = _encode_next_token(last_evaluated_key) if last_evaluated_key else None
+
+    return _response(200, {'items': items, 'next_token': next_token})
