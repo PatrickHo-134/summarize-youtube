@@ -15,8 +15,11 @@ export function App() {
   const {
     items: historyItems,
     isLoading: historyLoading,
+    isLoadingMore: historyLoadingMore,
+    nextToken: historyNextToken,
     error: historyError,
     fetch: fetchHistory,
+    fetchMore: fetchMoreHistory,
   } = useHistory();
   const [pendingUrl, setPendingUrl] = useState<string>("");
   const [view, setView] = useState<AppView>("new");
@@ -78,6 +81,9 @@ export function App() {
           <HistoryList
             items={historyItems}
             isLoading={historyLoading}
+            isLoadingMore={historyLoadingMore}
+            nextToken={historyNextToken}
+            onLoadMore={fetchMoreHistory}
             error={historyError}
           />
         )}

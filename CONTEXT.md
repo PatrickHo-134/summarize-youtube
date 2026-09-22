@@ -70,7 +70,8 @@ SUMMARIZE-YOUTUBE/
   - Runtime: **Python 3.13** (`x86_64`)
   - Timeout: 30 seconds
   - Triggered by: `GET /history` on the same API Gateway, protected by the same Cognito Authorizer
-  - Logic: Queries `user-submissions` by `user_id` (`sub` claim), batch-fetches `title` and `summary` from `youtube-summaries`, and returns items sorted newest-first
+  - Logic: Queries `user-submissions` by `user_id` (`sub` claim) using cursor-based pagination (`Limit` and `ExclusiveStartKey`). It batch-fetches `title` and `summary` from `youtube-summaries` for the returned page slice.
+  - Response Contract: Returns a JSON payload containing the paginated items and a Base64-encoded continuation token (`{ "items": [ ... ], "next_token": "..." | null }`).
   - IAM Roles: `AmazonDynamoDBFullAccess`
   - Environment Variables: `USER_SUBMISSIONS_TABLE`, `YOUTUBE_SUMMARIES_TABLE`, `CORS_ALLOW_ORIGIN`
   - Packaging: `backend/get_history/build.sh` (pure-Python, no cross-compilation needed)
@@ -132,47 +133,3 @@ cd backend/get_history
 chmod +x build.sh
 ./build.sh
 ```
-
-## 5\. Key Issues Resolved & Solutions
-
-### 5.1 Endpoint Path & CORS (502 / Preflight Failures)
-
-- **Problem:** `app.js` called `/prod` instead of `/prod/summarize`, causing CORS headers to be missed.
-
-- **Fix:** Set `API_ENDPOINT` to `https://etx***.execute-api.ap-southeast-2.amazonaws.com/prod/summarize` and redeployed API Gateway stage `prod`.
-
-### 5.2 Binaries Mismatch (`pydantic_core`)
-
-- **Problem:** Local build on macOS caused `ImportModuleError: No module named 'pydantic_core._pydantic_core'` on Lambda's Linux environment.
-
-- **Fix:** Built packaging using cross-platform Linux flags `--platform manylinux2014_x86_64` for Python 3.13.
-
-### 5.3 AWS Datacenter IP Block by YouTube
-
-- **Problem:** YouTube blocked transcript requests originating from AWS cloud provider IP ranges.
-
-- **Fix:** Integrated residential proxies (DataImpulse) injected through the `PROXY_URL` environment variable via `GenericProxyConfig`.
-
-### 5.4 Frontend UI Modernization & Monorepo Migration
-
-- **Problem:** Legacy single `index.html` rendered raw unformatted Markdown string output without interactive retry or mailing options.
-
-- **Fix:** Migrated to React/TypeScript inside `/frontend`. Utilized `react-markdown` for structured HTML rendering, added a cache hit indicator badge, implemented a `mailto:` email summary trigger, and created a retry action button on API failure.
-
-### 5.5 Minimalist UI Redesign & Dashboard Library (`HistoryList`)
-
--   **Problem:** The interface lacked structured navigation and a dedicated library view to explore previously summarized videos.
-
--   **Fix:** Redesigned the UI using Tailwind CSS v4 and `lucide-react`. Built `Navbar.tsx` for seamless tab switching ("New Summary" vs "Dashboard"), updated `UrlForm.tsx` with a centered pill-style input hero section, and created `HistoryList.tsx` to render saved summaries as structured cards with date badges and "Newest/Oldest first" sorting.
-
-
-### 5.6 History Page — Dedicated `get-history` Lambda
-
--   **Problem:** The Dashboard (`HistoryList`) needed a dedicated backend endpoint to retrieve a user's previously summarized videos, joining data across two DynamoDB tables (`user-submissions` and `youtube-summaries`).
-
--   **Fix:** Created a standalone Lambda function (`backend/get_history/`) that authenticates via the `sub` Cognito claim, queries `user-submissions` by `user_id`, batch-fetches `video_id`, `title`, and `summary` from `youtube-summaries`, and returns a CORS-safe JSON response sorted newest-first. The function has its own `build.sh` (no native deps) and Pytest test suite.
-
-### 5.7 Raw Transcript Caching & DynamoDB Constraints
-
-- **Problem:** DynamoDB imposes a strict 400 KB maximum item size limit. Storing raw transcripts for long videos (e.g., 2+ hour podcasts) directly in the `youtube-summaries` table risked triggering `ValidationException` errors. Furthermore, lacking a permanent raw data asset required unnecessary re-fetching for future features (like generating different summary lengths).
-- **Fix:** Implemented a hybrid storage strategy. The `youtube-summarizer` Lambda now executes a fire-and-forget S3 upload of the raw transcript JSON to a dedicated bucket (`youtube-transcripts-cache-prod`) immediately after a successful proxy fetch. DynamoDB remains the fast-access cache for the concise OpenAI summaries. If the S3 upload fails (e.g., IAM issue), it logs the error and gracefully proceeds to LLM generation so the end user is not interrupted.

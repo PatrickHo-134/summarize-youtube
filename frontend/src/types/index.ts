@@ -23,5 +23,5 @@ export interface HistoryItem {
 
 export interface HistoryPage {
   items: HistoryItem[];
-  nextCursor: string | null;
+  next_token: string | null;
 }

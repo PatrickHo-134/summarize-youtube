@@ -6,18 +6,25 @@ import {
   Play,
   ExternalLink,
   ChevronDown,
+  Loader2,
 } from "lucide-react";
 import { type HistoryItem } from "../types";
 
 interface HistoryListProps {
   items: HistoryItem[];
   isLoading?: boolean;
+  isLoadingMore?: boolean;
+  nextToken?: string | null;
+  onLoadMore?: () => void;
   error?: string | null;
 }
 
 export const HistoryList: React.FC<HistoryListProps> = ({
   items = [],
   isLoading = false,
+  isLoadingMore = false,
+  nextToken = null,
+  onLoadMore,
   error = null,
 }) => {
   const [sortBy, setSortBy] = useState<"newest" | "oldest">("newest");
@@ -158,6 +165,25 @@ export const HistoryList: React.FC<HistoryListProps> = ({
               </div>
             </article>
           ))}
+
+          {nextToken && (
+            <div className="flex justify-center pt-2">
+              <button
+                onClick={onLoadMore}
+                disabled={isLoadingMore}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-700 shadow-2xs hover:bg-slate-50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {isLoadingMore ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Loading…
+                  </>
+                ) : (
+                  'Load More'
+                )}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>
