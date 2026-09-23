@@ -62,25 +62,31 @@ def test_lambda_handler_invalid_url(mock_record):
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
 def test_lambda_handler_cache_hit(mock_check_cache, mock_record):
-    mock_check_cache.return_value = "- Cached Point 1\n- Cached Point 2"
+    mock_check_cache.return_value = {
+        'summary': "- Cached Point 1\n- Cached Point 2",
+        'title': "Mocked Video Title"
+    }
 
     response = lambda_handler(make_event("https://youtube.com/watch?v=12345678901"), {})
 
     assert response["statusCode"] == 200
     body = json.loads(response["body"])
     assert body["summary"] == "- Cached Point 1\n- Cached Point 2"
+    assert body["title"] == "Mocked Video Title"
     assert body["source"] == "cache"
     mock_check_cache.assert_called_once_with("12345678901")
 
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
 @patch('src.lambda_function.save_to_cache')
 @patch('src.lambda_function.upload_transcript_to_s3')
-def test_lambda_handler_cache_miss_success(mock_upload, mock_save, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+def test_lambda_handler_cache_miss_success(mock_upload, mock_save, mock_summarise, mock_get_transcript, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
+    mock_get_title.return_value = "Mocked Video Title"
     raw_transcript_data = [{"text": "Full transcript content"}]
     mock_get_transcript.return_value = ("Full transcript content", raw_transcript_data, None, None)
     mock_summarise.return_value = ("New AI summary", None, None)
@@ -93,17 +99,19 @@ def test_lambda_handler_cache_miss_success(mock_upload, mock_save, mock_summaris
     assert body["source"] == "llm"
 
     mock_check_cache.assert_called_once_with("12345678901")
+    mock_get_title.assert_called_once_with("12345678901")
     mock_get_transcript.assert_called_once_with("12345678901")
-    mock_upload.assert_called_once_with("12345678901", raw_transcript_data)
+    mock_upload.assert_called_once_with("12345678901", "Mocked Video Title", raw_transcript_data)
     mock_summarise.assert_called_once_with("Full transcript content")
-    mock_save.assert_called_once_with("12345678901", "New AI summary")
+    mock_save.assert_called_once_with("12345678901", "Mocked Video Title", "New AI summary")
 
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.upload_transcript_to_s3')
-def test_lambda_handler_transcript_disabled(mock_upload, mock_get_transcript, mock_check_cache, mock_record):
+def test_lambda_handler_transcript_disabled(mock_upload, mock_get_transcript, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
     mock_get_transcript.return_value = (None, None, "Transcripts are disabled for this video.", 400)
 
@@ -218,9 +226,10 @@ def test_get_transcript_no_sleep_on_first_attempt(mock_ytt_class, mock_sleep):
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.time.sleep')
 @patch('src.lambda_function.YouTubeTranscriptApi')
-def test_lambda_handler_all_proxies_fail_returns_429(mock_ytt_class, mock_sleep, mock_check_cache, mock_record):
+def test_lambda_handler_all_proxies_fail_returns_429(mock_ytt_class, mock_sleep, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
     mock_ytt_class.return_value.fetch.side_effect = Exception("Connection refused")
 
@@ -322,10 +331,11 @@ def test_summarise_bad_request_other(mock_get_client):
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
 @patch('src.lambda_function.upload_transcript_to_s3')
-def test_lambda_handler_openai_rate_limit_returns_429(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+def test_lambda_handler_openai_rate_limit_returns_429(mock_upload, mock_summarise, mock_get_transcript, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
     mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "OpenAI rate limit reached. Please try again in a moment.", 429)
@@ -337,10 +347,11 @@ def test_lambda_handler_openai_rate_limit_returns_429(mock_upload, mock_summaris
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
 @patch('src.lambda_function.upload_transcript_to_s3')
-def test_lambda_handler_openai_timeout_returns_504(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+def test_lambda_handler_openai_timeout_returns_504(mock_upload, mock_summarise, mock_get_transcript, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
     mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "OpenAI request timed out. Please try again.", 504)
@@ -352,10 +363,11 @@ def test_lambda_handler_openai_timeout_returns_504(mock_upload, mock_summarise, 
 
 @patch('src.lambda_function.record_user_submission')
 @patch('src.lambda_function.check_cache')
+@patch('src.lambda_function.get_video_title')
 @patch('src.lambda_function.get_transcript')
 @patch('src.lambda_function.summarise')
 @patch('src.lambda_function.upload_transcript_to_s3')
-def test_lambda_handler_transcript_too_long_returns_400(mock_upload, mock_summarise, mock_get_transcript, mock_check_cache, mock_record):
+def test_lambda_handler_transcript_too_long_returns_400(mock_upload, mock_summarise, mock_get_transcript, mock_get_title, mock_check_cache, mock_record):
     mock_check_cache.return_value = None
     mock_get_transcript.return_value = ("transcript", [{"text": "transcript"}], None, None)
     mock_summarise.return_value = (None, "This video's transcript is too long to summarize.", 400)
