@@ -6,6 +6,8 @@ import time
 import random
 from datetime import datetime, timezone
 import boto3
+import urllib.request
+import urllib.error
 from botocore.exceptions import ClientError
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, VideoUnavailable, NoTranscriptFound
@@ -117,31 +119,45 @@ def get_transcript(video_id):
 
     return None, None, f"All proxies exhausted. Last error: {last_error}", 429
 
+def get_video_title(video_id: str) -> str:
+    """Fetches the video title via YouTube's public oEmbed API."""
+    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            return data.get("title", "Unknown Title")
+    except Exception as e:
+        logger.warning(f"Failed to fetch video titel for {video_id}: {str(e)}")
+        return "Unknown Title"
+
 def check_cache(video_id):
     """Checks if the summary already exists in DynamoDB."""
     try:
         table = dynamodb.Table(config.YOUTUBE_SUMMARIES_TABLE)
         response = table.get_item(Key={'video_id': video_id})
         if 'Item' in response:
-            return response['Item'].get('summary')
+            return response['Item']
     except ClientError as e:
         logger.error(f"DynamoDB read error (youtube-summaries): {e.response['Error']['Message']}")
     return None
 
-def save_to_cache(video_id, summary):
+def save_to_cache(video_id, title, summary):
     """Saves the generated summary to DynamoDB."""
     try:
         table = dynamodb.Table(config.YOUTUBE_SUMMARIES_TABLE)
         table.put_item(
             Item={
                 'video_id': video_id,
+                'title': title,
                 'summary': summary
             }
         )
     except ClientError as e:
         logger.error(f"DynamoDB write error (youtube-summaries): {e.response['Error']['Message']}")
 
-def upload_transcript_to_s3(video_id, raw_transcript):
+def upload_transcript_to_s3(video_id, title, raw_transcript):
     """Uploads the raw transcript payload to S3 without blocking the main execution."""
     if not getattr(config, 'TRANSCRIPT_BUCKET', None):
         logger.warning("TRANSCRIPT_BUCKET not configured. Skipping S3 upload.")
@@ -150,6 +166,7 @@ def upload_transcript_to_s3(video_id, raw_transcript):
     try:
         payload = {
             "video_id": video_id,
+            "title": title,
             "fetched_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
             "language": "en",
             "transcript": raw_transcript
@@ -245,14 +262,22 @@ def lambda_handler(event, context):
 
         # Log the cache check
         logger.info("Checking DynamoDB cache...")
-        cached_summary = check_cache(video_id)
-        if cached_summary:
+        cached_item = check_cache(video_id)
+        if cached_item:
             logger.info("Cache hit. Returning cached summary.")
             return {
                 'statusCode': 200,
                 'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({'summary': cached_summary, 'source': 'cache'})
+                'body': json.dumps({
+                    'summary': cached_item.get('summary'),
+                    'title': cached_item.get('title'),
+                    'source': 'cache'
+                    })
             }
+
+        # Fetch the title
+        video_title = get_video_title(video_id)
+        logger.info(f"Video Title: {video_title}")
 
         # Log the transcript fetch (Common failure point)
         proxy_configured = bool(os.environ.get('PROXY_URL'))
@@ -269,7 +294,7 @@ def lambda_handler(event, context):
 
         logger.info(f"Transcript fetched successfully. Length: {len(transcript)} characters.")
 
-        upload_transcript_to_s3(video_id, raw_transcript)
+        upload_transcript_to_s3(video_id, video_title, raw_transcript)
 
         # Log the LLM execution (Another common timeout point)
         logger.info("Sending transcript to OpenAI...")
@@ -283,7 +308,7 @@ def lambda_handler(event, context):
             }
 
         logger.info("Successfully generated summary. Saving to cache.")
-        save_to_cache(video_id, summary)
+        save_to_cache(video_id, video_title, summary)
 
         return {
             'statusCode': 200,
