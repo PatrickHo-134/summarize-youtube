@@ -55,7 +55,9 @@ def get_submissions(user_id: str, limit: int, exclusive_start_key: dict | None) 
     table = dynamodb.Table(USER_SUBMISSIONS_TABLE)
     try:
         kwargs = {
+            'IndexName':'user_id-created_at-index',
             'KeyConditionExpression': boto3.dynamodb.conditions.Key('user_id').eq(user_id),
+            'ScanIndexForward':False,
             'Limit': limit,
         }
         if exclusive_start_key:
