@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { getCurrentUser } from "aws-amplify/auth";
 import type { AppView } from "./types";
+import { handleSignOut as authSignOut } from "./services/auth";
 import { useSummarize } from "./hooks/useSummarize";
 import { Navbar } from "./components/Navbar";
 import { UrlForm } from "./components/UrlForm";
@@ -10,7 +12,7 @@ import { HistoryList } from "./components/HistoryList";
 import { useHistory } from "./hooks/useHistory";
 
 export function App() {
-  const { loading, error, data, needsAuth, setNeedsAuth, submitUrl } =
+  const { loading, error, data, needsAuth, setNeedsAuth, sessionExpired: summarizeExpired, setSessionExpired: setSummarizeExpired, submitUrl } =
     useSummarize();
   const {
     items: historyItems,
@@ -18,17 +20,49 @@ export function App() {
     isLoadingMore: historyLoadingMore,
     nextToken: historyNextToken,
     error: historyError,
+    sessionExpired: historyExpired,
+    setSessionExpired: setHistoryExpired,
     fetch: fetchHistory,
     fetchMore: fetchMoreHistory,
   } = useHistory();
   const [pendingUrl, setPendingUrl] = useState<string>("");
   const [view, setView] = useState<AppView>("new");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const handlingExpiry = useRef(false);
+
+  useEffect(() => {
+    getCurrentUser()
+      .then((user) => setUserEmail(user.signInDetails?.loginId ?? user.username))
+      .catch(() => setUserEmail(null));
+  }, []);
+
+  useEffect(() => {
+    if ((summarizeExpired || historyExpired) && !handlingExpiry.current) {
+      handlingExpiry.current = true;
+      authSignOut().finally(() => {
+        setUserEmail(null);
+        setView("new");
+        setAuthMessage("Your session has expired. Please sign in again.");
+        setNeedsAuth(true);
+        setSummarizeExpired(false);
+        setHistoryExpired(false);
+        handlingExpiry.current = false;
+      });
+    }
+  }, [summarizeExpired, historyExpired, setNeedsAuth, setSummarizeExpired, setHistoryExpired]);
 
   useEffect(() => {
     if (view === "dashboard") {
       fetchHistory();
     }
   }, [view, fetchHistory]);
+
+  const handleSignOut = async () => {
+    await authSignOut();
+    setUserEmail(null);
+    setView("new");
+  };
 
   const handleSubmit = (url: string) => {
     setPendingUrl(url);
@@ -37,12 +71,16 @@ export function App() {
 
   const handleAuthSuccess = () => {
     setNeedsAuth(false);
+    setAuthMessage(null);
     submitUrl(pendingUrl);
+    getCurrentUser()
+      .then((user) => setUserEmail(user.signInDetails?.loginId ?? user.username))
+      .catch(() => setUserEmail(null));
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-gray-900">
-      <Navbar view={view} onViewChange={setView} />
+      <Navbar view={view} onViewChange={setView} userEmail={userEmail} onSignOut={handleSignOut} />
       <div className="max-w-3xl mx-auto space-y-8 py-12 px-4 sm:px-6 lg:px-8">
         {view === "new" && (
           <>
@@ -91,8 +129,9 @@ export function App() {
 
       <AuthModal
         isOpen={needsAuth}
-        onClose={() => setNeedsAuth(false)}
+        onClose={() => { setNeedsAuth(false); setAuthMessage(null); }}
         onSuccess={handleAuthSuccess}
+        message={authMessage}
       />
     </div>
   );

@@ -5,9 +5,10 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  message?: string | null;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess, message }) => {
   if (!isOpen) return null;
 
   return (
@@ -19,6 +20,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         >
           ✕
         </button>
+        {message && (
+          <div className="mb-3 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800 text-center">
+            {message}
+          </div>
+        )}
         <Authenticator>
           {({ user }) => <AuthSuccessTrigger user={user} onSuccess={onSuccess} />}
         </Authenticator>

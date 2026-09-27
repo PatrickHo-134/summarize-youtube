@@ -7,6 +7,7 @@ export function useSummarize() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<SummarizeResponse | null>(null);
   const [needsAuth, setNeedsAuth] = useState<boolean>(false);
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
   const submitUrl = async (youtubeUrl: string) => {
     setError(null);
@@ -32,6 +33,11 @@ export function useSummarize() {
 
       const json = await response.json();
 
+      if (response.status === 401 || response.status === 403) {
+        setSessionExpired(true);
+        return;
+      }
+
       if (!response.ok) {
         setError(json.error ?? `Request failed with status ${response.status}`);
       } else {
@@ -50,6 +56,8 @@ export function useSummarize() {
     data,
     needsAuth,
     setNeedsAuth,
+    sessionExpired,
+    setSessionExpired,
     submitUrl,
   };
 }

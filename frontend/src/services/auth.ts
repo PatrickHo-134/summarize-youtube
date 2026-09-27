@@ -1,4 +1,4 @@
-import { fetchAuthSession, getCurrentUser } from 'aws-amplify/auth'
+import { fetchAuthSession, getCurrentUser, signOut } from 'aws-amplify/auth'
 
 export async function getAuthToken(): Promise<string | null> {
   try {
@@ -15,5 +15,15 @@ export async function checkIsAuthenticated(): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+export async function handleSignOut(): Promise<void> {
+  await signOut({ global: true })
+  for (const storage of [localStorage, sessionStorage]) {
+    const keysToRemove = Object.keys(storage).filter(
+      (k) => k.startsWith('CognitoIdentityServiceProvider') || k.startsWith('amplify-')
+    )
+    keysToRemove.forEach((k) => storage.removeItem(k))
   }
 }
