@@ -147,3 +147,55 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+/* ── Amplify Authenticator overrides ───────────────────────────────────── */
+[data-amplify-authenticator] [data-amplify-router] {
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+[data-amplify-authenticator] .amplify-label {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #374151;
+}
+
+[data-amplify-authenticator] .amplify-input,
+[data-amplify-authenticator] .amplify-select {
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  color: #111827;
+  background-color: #fff;
+}
+
+[data-amplify-authenticator] .amplify-field-group__outer-end .amplify-field-group__control,
+[data-amplify-authenticator] .amplify-field-group__outer-start .amplify-field-group__control {
+  border-radius: 0 0.5rem 0.5rem 0;
+}
+
+[data-amplify-authenticator] .amplify-field--error .amplify-input {
+  border-color: #f87171;
+}
+
+[data-amplify-authenticator] .amplify-field__error-message {
+  font-size: 0.75rem;
+  color: #dc2626;
+}
+
+[data-amplify-authenticator] .amplify-button[data-variation="primary"] {
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  padding-block: 0.625rem;
+}
+
+[data-amplify-authenticator] .amplify-button[data-variation="link"] {
+  font-size: 0.8125rem;
+}
+
+[data-amplify-authenticator] .amplify-heading {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
