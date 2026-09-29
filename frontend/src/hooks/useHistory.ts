@@ -8,6 +8,8 @@ interface UseHistoryResult {
   isLoadingMore: boolean;
   nextToken: string | null;
   error: string | null;
+  sessionExpired: boolean;
+  setSessionExpired: (v: boolean) => void;
   fetch: () => Promise<void>;
   fetchMore: () => Promise<void>;
 }
@@ -18,6 +20,7 @@ export function useHistory(): UseHistoryResult {
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [nextToken, setNextToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState<boolean>(false);
 
   const fetchHistory = useCallback(async (cursor?: string | null) => {
     const isInitial = !cursor;
@@ -50,6 +53,11 @@ export function useHistory(): UseHistoryResult {
 
       const json = await response.json();
 
+      if (response.status === 401 || response.status === 403) {
+        setSessionExpired(true);
+        return;
+      }
+
       if (!response.ok) {
         setError(json.error ?? `Failed to load history (${response.status}).`);
         return;
@@ -76,5 +84,5 @@ export function useHistory(): UseHistoryResult {
   const fetch = useCallback(() => fetchHistory(null), [fetchHistory]);
   const fetchMore = useCallback(() => fetchHistory(nextToken), [fetchHistory, nextToken]);
 
-  return { items, isLoading, isLoadingMore, nextToken, error, fetch, fetchMore };
+  return { items, isLoading, isLoadingMore, nextToken, error, sessionExpired, setSessionExpired, fetch, fetchMore };
 }

@@ -3,9 +3,11 @@ import type { AppView } from "../types";
 interface NavbarProps {
   view: AppView;
   onViewChange: (view: AppView) => void;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
-export function Navbar({ view, onViewChange }: NavbarProps) {
+export function Navbar({ view, onViewChange, userEmail, onSignOut }: NavbarProps) {
   return (
     <nav className="w-full bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto flex items-center justify-between h-14">
@@ -46,6 +48,17 @@ export function Navbar({ view, onViewChange }: NavbarProps) {
           >
             Dashboard
           </button>
+
+          {userEmail && onSignOut && (
+            <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200">
+              <button
+                onClick={onSignOut}
+                className="px-3 py-1.5 text-sm font-medium rounded-md text-red-600 hover:bg-red-50 transition cursor-pointer"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </nav>
