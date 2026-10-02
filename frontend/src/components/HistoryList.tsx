@@ -6,6 +6,9 @@ import {
   Play,
   ExternalLink,
   ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
+  ChevronsDownUp,
   Loader2,
 } from "lucide-react";
 import { type HistoryItem } from "../types";
@@ -28,6 +31,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
   error = null,
 }) => {
   const [sortBy, setSortBy] = useState<"newest" | "oldest">("newest");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   const safeItems = Array.isArray(items) ? items : [];
 
@@ -39,6 +43,28 @@ export const HistoryList: React.FC<HistoryListProps> = ({
       return sortBy === "newest" ? dateB - dateA : dateA - dateB;
     });
   }, [safeItems, sortBy]);
+
+  const allExpanded = sortedItems.length > 0 && expandedIds.size === sortedItems.length;
+
+  const toggleAll = () => {
+    if (allExpanded) {
+      setExpandedIds(new Set());
+    } else {
+      setExpandedIds(new Set(sortedItems.map((item) => item.videoId)));
+    }
+  };
+
+  const toggleCard = (videoId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(videoId)) {
+        next.delete(videoId);
+      } else {
+        next.add(videoId);
+      }
+      return next;
+    });
+  };
 
   const formatDate = (dateString: string) => {
     try {
@@ -91,7 +117,18 @@ export const HistoryList: React.FC<HistoryListProps> = ({
         </div>
 
         {items.length > 0 && (
-          <div className="relative inline-flex items-center self-start sm:self-auto bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <button
+              onClick={toggleAll}
+              className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs text-sm font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+            >
+              {allExpanded ? (
+                <><ChevronsDownUp className="w-4 h-4 text-slate-400" />Collapse All</>
+              ) : (
+                <><ChevronsUpDown className="w-4 h-4 text-slate-400" />Expand All</>
+              )}
+            </button>
+          <div className="relative inline-flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
             <ArrowUpDown className="w-4 h-4 text-slate-400 mr-2 shrink-0" />
             <select
               value={sortBy}
@@ -102,6 +139,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
               <option value="oldest">Oldest first</option>
             </select>
             <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-2.5" />
+          </div>
           </div>
         )}
       </div>
@@ -124,7 +162,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           {sortedItems.map((item) => (
             <article
               key={`${item.videoId}-${item.createdAt}`}
-              className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs hover:shadow-xs transition-shadow space-y-4"
+              className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs hover:shadow-xs transition-shadow"
             >
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
                 <div className="flex items-start gap-3">
@@ -147,15 +185,27 @@ export const HistoryList: React.FC<HistoryListProps> = ({
                   </div>
                 </div>
 
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-50 border border-slate-200/60 text-slate-500 text-xs font-medium shrink-0 self-start sm:self-auto">
-                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{formatDate(item.createdAt)}</span>
+                <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-50 border border-slate-200/60 text-slate-500 text-xs font-medium">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{formatDate(item.createdAt)}</span>
+                  </div>
+                  <button
+                    onClick={() => toggleCard(item.videoId)}
+                    className="flex items-center justify-center w-7 h-7 rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition cursor-pointer"
+                    aria-label={expandedIds.has(item.videoId) ? "Collapse" : "Expand"}
+                  >
+                    {expandedIds.has(item.videoId) ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </button>
                 </div>
               </div>
 
-              <hr className="border-slate-100" />
-
-              <RenderMarkdown content={item.summary} />
+              {expandedIds.has(item.videoId) && (
+                <>
+                  <hr className="border-slate-100" />
+                  <RenderMarkdown content={item.summary} />
+                </>
+              )}
             </article>
           ))}
 
