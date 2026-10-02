@@ -5,9 +5,10 @@ interface NavbarProps {
   onViewChange: (view: AppView) => void;
   userEmail?: string | null;
   onSignOut?: () => void;
+  onLogin?: () => void;
 }
 
-export function Navbar({ view, onViewChange, userEmail, onSignOut }: NavbarProps) {
+export function Navbar({ view, onViewChange, userEmail, onSignOut, onLogin }: NavbarProps) {
   return (
     <nav className="w-full bg-white border-b border-gray-200 px-4 sm:px-6 lg:px-8">
       <div className="max-w-3xl mx-auto flex items-center justify-between h-14">
@@ -49,7 +50,7 @@ export function Navbar({ view, onViewChange, userEmail, onSignOut }: NavbarProps
             Dashboard
           </button>
 
-          {userEmail && onSignOut && (
+          {userEmail && onSignOut ? (
             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-200">
               <button
                 onClick={onSignOut}
@@ -58,7 +59,16 @@ export function Navbar({ view, onViewChange, userEmail, onSignOut }: NavbarProps
                 Sign Out
               </button>
             </div>
-          )}
+          ) : onLogin ? (
+            <div className="ml-2 pl-2 border-l border-gray-200">
+              <button
+                onClick={onLogin}
+                className="px-3 py-1.5 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition cursor-pointer"
+              >
+                Login
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
     </nav>

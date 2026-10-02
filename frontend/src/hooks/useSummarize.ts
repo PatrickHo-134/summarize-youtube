@@ -50,6 +50,14 @@ export function useSummarize() {
     }
   };
 
+  const reset = () => {
+    setData(null);
+    setError(null);
+    setLoading(false);
+    setNeedsAuth(false);
+    setSessionExpired(false);
+  };
+
   return {
     loading,
     error,
@@ -59,5 +67,6 @@ export function useSummarize() {
     sessionExpired,
     setSessionExpired,
     submitUrl,
+    reset,
   };
 }

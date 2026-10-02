@@ -12,7 +12,7 @@ import { HistoryList } from "./components/HistoryList";
 import { useHistory } from "./hooks/useHistory";
 
 export function App() {
-  const { loading, error, data, needsAuth, setNeedsAuth, sessionExpired: summarizeExpired, setSessionExpired: setSummarizeExpired, submitUrl } =
+  const { loading, error, data, needsAuth, setNeedsAuth, sessionExpired: summarizeExpired, setSessionExpired: setSummarizeExpired, submitUrl, reset: resetSummarize } =
     useSummarize();
   const {
     items: historyItems,
@@ -60,8 +60,15 @@ export function App() {
 
   const handleSignOut = async () => {
     await authSignOut();
+    resetSummarize();
+    setPendingUrl("");
     setUserEmail(null);
     setView("new");
+  };
+
+  const handleLogin = () => {
+    setAuthMessage(null);
+    setNeedsAuth(true);
   };
 
   const handleSubmit = (url: string) => {
@@ -80,7 +87,7 @@ export function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-gray-900">
-      <Navbar view={view} onViewChange={setView} userEmail={userEmail} onSignOut={handleSignOut} />
+      <Navbar view={view} onViewChange={setView} userEmail={userEmail} onSignOut={handleSignOut} onLogin={handleLogin} />
       <div className="max-w-3xl mx-auto space-y-8 py-12 px-4 sm:px-6 lg:px-8">
         {view === "new" && (
           <>
