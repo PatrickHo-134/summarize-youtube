@@ -123,9 +123,9 @@ export const HistoryList: React.FC<HistoryListProps> = ({
               className="inline-flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs text-sm font-medium text-slate-700 hover:bg-slate-50 transition cursor-pointer"
             >
               {allExpanded ? (
-                <><ChevronsDownUp className="w-4 h-4 text-slate-400" />Collapse All</>
+                <><ChevronsDownUp className="w-4 h-4 text-slate-400" />Collapse</>
               ) : (
-                <><ChevronsUpDown className="w-4 h-4 text-slate-400" />Expand All</>
+                <><ChevronsUpDown className="w-4 h-4 text-slate-400" />Expand</>
               )}
             </button>
           <div className="relative inline-flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-2xs">
