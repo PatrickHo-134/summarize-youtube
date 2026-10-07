@@ -47,7 +47,7 @@ export function Navbar({ view, onViewChange, userEmail, onSignOut, onLogin }: Na
                 : "text-gray-500 hover:text-gray-800"
             }`}
           >
-            Dashboard
+            History
           </button>
 
           {userEmail && onSignOut ? (

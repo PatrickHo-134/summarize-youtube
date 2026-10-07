@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import ReactMarkdown from "react-markdown";
+import { RenderMarkdown } from "./RenderMarkdown";
 import {
   Calendar,
   ArrowUpDown,
@@ -155,14 +155,7 @@ export const HistoryList: React.FC<HistoryListProps> = ({
 
               <hr className="border-slate-100" />
 
-              <div
-                className="prose prose-slate max-w-none text-sm leading-relaxed text-slate-600
-                  prose-headings:font-bold prose-headings:text-slate-900 prose-headings:text-base prose-headings:mt-3 prose-headings:mb-1.5
-                  prose-p:my-1.5
-                  prose-ul:my-2 prose-ul:pl-4 prose-li:my-1 prose-li:marker:text-indigo-500"
-              >
-                <ReactMarkdown>{item.summary}</ReactMarkdown>
-              </div>
+              <RenderMarkdown content={item.summary} />
             </article>
           ))}
 

@@ -101,7 +101,7 @@ export function App() {
 
             {data && !loading && (
               <div className="space-y-4">
-                <SummaryViewer summary={data.summary} source={data.source} />
+                <SummaryViewer summary={data.summary} source={data.source} title={data.title} />
                 <ActionControls
                   status="success"
                   summaryText={data.summary}
