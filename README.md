@@ -1,8 +1,11 @@
 # Serverless YouTube Summarizer (AWS Cloud-Native)
 
 ![version](https://img.shields.io/badge/version-2.6.1-blue)
+[![Live Demo](https://img.shields.io/badge/Live_App-youtubesummary.patrickho.dev-4f46e5)](https://youtubesummary.patrickho.dev)
 
-An end-to-end, serverless web application that accepts a YouTube URL, extracts its transcript, generates a structured summary using OpenAI's GPT-4o-mini, and caches the results in DynamoDB. The application features a modern React/TypeScript frontend distributed globally via CloudFront from a private S3 bucket.
+An end-to-end, serverless web application that accepts a YouTube URL, extracts its transcript, generates a structured summary using OpenAI's GPT-4o-mini, and caches the results in DynamoDB. The application features a modern React/TypeScript frontend distributed globally via CloudFront from a private S3 bucket and mapped to a custom domain via Cloudflare.
+
+**Live Application:** [https://youtubesummary.patrickho.dev](https://youtubesummary.patrickho.dev)
 
 ---
 
@@ -10,6 +13,9 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 
 ```
 [ User Browser (Amplify Auth) ]
+       │
+       ▼
+[ Cloudflare DNS & WAF ]
        │
        ▼
 [ CloudFront CDN ] ──► [ S3 Bucket (Vite + React + TS Static Build) ]
@@ -34,7 +40,7 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 
 - **Frontend:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
 - **Authentication:** Amazon Cognito User Pools mapped via the AWS Amplify v6 `@aws-amplify/ui-react` SDK.
-- **Hosting & Distribution:** Amazon S3 (Private Bucket) + CloudFront CDN with Origin Access Control (OAC).
+- **Hosting & Custom Domain:** Cloudflare DNS & WAF + Amazon CloudFront CDN (Origin Access Control) + Amazon S3 (Private Bucket) secured via an AWS Certificate Manager (ACM) SSL certificate provisioned in `us-east-1` for `youtubesummary.patrickho.dev`.
 - **API Gateway:** REST API (`POST /summarize` and `GET /history`) secured via Cognito Authorizer with CORS enabled.
 - **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
 - **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables), Amazon S3 (`youtube-transcripts-cache-<env>` for raw transcripts), and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
