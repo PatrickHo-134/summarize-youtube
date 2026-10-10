@@ -159,6 +159,7 @@ This script compiles production assets (npm run build), syncs the dist/ director
 ```bash
 python3.13 -m venv backend/venv
 backend/venv/bin/pip install -r backend/summarize/requirements-dev.txt
+backend/venv/bin/pip install -r backend/job_status/requirements-dev.txt
 ```
 
 #### Run tests
@@ -169,7 +170,12 @@ backend/venv/bin/python -m pytest backend/summarize/tests/test_lambda_function.p
 
 # get-history tests
 backend/venv/bin/python -m pytest backend/get_history/tests/test_lambda_function.py -v
+
+# job-status tests (uses moto to mock DynamoDB)
+backend/venv/bin/python -m pytest backend/job_status/tests/test_lambda_function.py -v
 ```
+
+> **Note:** Each Lambda's test suite must be run individually (as shown above). Running multiple `tests/test_lambda_function.py` files together in a single `pytest` invocation will fail due to duplicate module basenames across packages.
 
 ---
 
