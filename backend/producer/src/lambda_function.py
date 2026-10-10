@@ -24,7 +24,7 @@ def response(status_code, body):
     }
 
 
-def handler(event, context):
+def lambda_handler(event, context):
     try:
         user_id = (
             event.get("requestContext", {})
