@@ -226,100 +226,74 @@ def summarise(content):
     except Exception as e:
         return None, f"LLM Provider Error: {str(e)}", 502
 
-def lambda_handler(event, context):
+def update_job_status(job_id, status, result_payload=None, error_message=None):
+    """Updates the job status in SUMMARIZATION_JOBS_TABLE."""
     try:
-        logger.info(f"Incoming event body: {event.get('body')}")
-
-        # Extract & validate authenticated user identity
-        user_id = extract_user_id(event)
-        if not user_id:
-            logger.warning("Unauthorized access attempt: Missing or invalid user claims.")
-            return {
-                'statusCode': 401,
-                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({'error': 'Unauthorized user token.'})
-            }
-
-        logger.info(f"Request authorized for User ID: {user_id}")
-
-        body = json.loads(event.get('body', '{}'))
-        youtube_url = body.get('url')
-
-        # Validate URL
-        video_id = extract_and_validate_video_id(youtube_url)
-        if not video_id:
-            logger.warning(f"URL validation failed for input: {youtube_url}")
-            return {
-                'statusCode': 400,
-                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({'error': 'Invalid or missing YouTube URL.'})
-            }
-
-        logger.info(f"Successfully extracted Video ID: {video_id}")
-
-        # Record ownership mapping for this user
-        record_user_submission(user_id, video_id)
-
-        # Log the cache check
-        logger.info("Checking DynamoDB cache...")
-        cached_item = check_cache(video_id)
-        if cached_item:
-            logger.info("Cache hit. Returning cached summary.")
-            return {
-                'statusCode': 200,
-                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({
-                    'summary': cached_item.get('summary'),
-                    'title': cached_item.get('title'),
-                    'source': 'cache'
-                    })
-            }
-
-        # Fetch the title
-        video_title = get_video_title(video_id)
-        logger.info(f"Video Title: {video_title}")
-
-        # Log the transcript fetch (Common failure point)
-        proxy_configured = bool(os.environ.get('PROXY_URL'))
-        logger.info(f"Cache miss. Fetching transcript... (Proxy Configured: {proxy_configured})")
-
-        transcript, raw_transcript, error, error_status = get_transcript(video_id)
-        if error:
-            logger.error(f"Transcript fetch failed: {error}")
-            return {
-                'statusCode': error_status,
-                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({'error': error})
-            }
-
-        logger.info(f"Transcript fetched successfully. Length: {len(transcript)} characters.")
-
-        upload_transcript_to_s3(video_id, video_title, raw_transcript)
-
-        # Log the LLM execution (Another common timeout point)
-        logger.info("Sending transcript to OpenAI...")
-        summary, llm_error, llm_status = summarise(transcript)
-        if llm_error:
-            logger.error(f"OpenAI API failed: {llm_error}")
-            return {
-                'statusCode': llm_status,
-                'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-                'body': json.dumps({'error': llm_error})
-            }
-
-        logger.info("Successfully generated summary. Saving to cache.")
-        save_to_cache(video_id, video_title, summary)
-
-        return {
-            'statusCode': 200,
-            'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-            'body': json.dumps({'summary': summary, 'source': 'llm'})
+        table = dynamodb.Table(config.SUMMARIZATION_JOBS_TABLE)
+        update_expr = "SET #s = :s, updated_at = :u"
+        expr_names = {"#s": "status"}
+        expr_values = {
+            ":s": status,
+            ":u": datetime.now(timezone.utc).isoformat(),
         }
+        if result_payload is not None:
+            update_expr += ", result = :r"
+            expr_values[":r"] = result_payload
+        if error_message is not None:
+            update_expr += ", error_message = :e"
+            expr_values[":e"] = error_message
+        table.update_item(
+            Key={"job_id": job_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+    except ClientError as e:
+        logger.error(f"Failed to update job status for job_id={job_id}: {e.response['Error']['Message']}")
 
-    except Exception as e:
-        logger.exception("An unexpected error occurred during Lambda execution.")
-        return {
-            'statusCode': 500,
-            'headers': {'Access-Control-Allow-Origin': config.CORS_ALLOW_ORIGIN},
-            'body': json.dumps({'error': "Internal server error."})
-        }
+
+def _process_record(record):
+    """Processes a single SQS record."""
+    body = json.loads(record["body"])
+    job_id = body["job_id"]
+    video_id = body["video_id"]
+    user_id = body["user_id"]
+
+    logger.info(f"Processing job_id={job_id}, video_id={video_id}, user_id={user_id}")
+    update_job_status(job_id, "PROCESSING")
+
+    transcript, raw_transcript, error, _ = get_transcript(video_id)
+    if error:
+        raise RuntimeError(f"Transcript fetch failed: {error}")
+
+    logger.info(f"Transcript fetched. Length: {len(transcript)} characters.")
+
+    video_title = get_video_title(video_id)
+    logger.info(f"Video Title: {video_title}")
+
+    upload_transcript_to_s3(video_id, video_title, raw_transcript)
+
+    logger.info("Sending transcript to OpenAI...")
+    summary, llm_error, _ = summarise(transcript)
+    if llm_error:
+        raise RuntimeError(f"LLM summarization failed: {llm_error}")
+
+    logger.info("Summary generated. Saving to DynamoDB.")
+    save_to_cache(video_id, video_title, summary)
+    record_user_submission(user_id, video_id)
+
+    result = {"video_id": video_id, "title": video_title, "summary": summary}
+    update_job_status(job_id, "COMPLETED", result_payload=result)
+    logger.info(f"Job {job_id} completed successfully.")
+
+
+def lambda_handler(event, context):
+    for record in event.get("Records", []):
+        body = json.loads(record.get("body", "{}"))
+        job_id = body.get("job_id", "unknown")
+        try:
+            _process_record(record)
+        except Exception as e:
+            logger.exception(f"Failed to process job_id={job_id}: {str(e)}")
+            update_job_status(job_id, "FAILED", error_message=str(e))
+            raise

@@ -12,6 +12,7 @@ def _optional(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
+SUMMARIZATION_JOBS_TABLE: str = _optional("SUMMARIZATION_JOBS_TABLE", "summarization-jobs")
 YOUTUBE_SUMMARIES_TABLE: str = _optional("DYNAMODB_TABLE", "youtube-summaries")
 USER_SUBMISSIONS_TABLE: str = _optional("USER_SUBMISSIONS_TABLE", "user-submissions")
 CORS_ALLOW_ORIGIN: str = _optional("CORS_ALLOW_ORIGIN", "*")
