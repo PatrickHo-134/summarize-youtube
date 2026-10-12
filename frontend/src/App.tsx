@@ -12,7 +12,7 @@ import { HistoryList } from "./components/HistoryList";
 import { useHistory } from "./hooks/useHistory";
 
 export function App() {
-  const { loading, error, data, needsAuth, setNeedsAuth, sessionExpired: summarizeExpired, setSessionExpired: setSummarizeExpired, submitUrl, reset: resetSummarize } =
+  const { loading, polling, error, data, needsAuth, setNeedsAuth, sessionExpired: summarizeExpired, setSessionExpired: setSummarizeExpired, submitUrl, reset: resetSummarize } =
     useSummarize();
   const {
     items: historyItems,
@@ -95,7 +95,9 @@ export function App() {
 
             {loading && (
               <div className="p-8 text-center text-gray-500 animate-pulse bg-white border border-gray-200 rounded-2xl shadow-sm">
-                Fetching transcript and generating summary...
+                {polling
+                  ? "Generating summary in the background..."
+                  : "Submitting your request..."}
               </div>
             )}
 
