@@ -9,7 +9,20 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 
 ---
 
-## 🏗️ System Architecture
+## 🏗️ Architecture & Asynchronous Flow
+
+1. **Job Submission (`POST /summarize`)**:
+   - The React frontend sends a YouTube video ID with a valid Cognito JWT.
+   - The `summarization-job-producer` Lambda generates a unique `job_id`, records an initial `PENDING` state in the `summarization-jobs` DynamoDB table, and pushes the payload to an **Amazon SQS queue**.
+   - Returns an HTTP `202 Accepted` response immediately with `{ job_id, status: "PENDING" }`.
+
+2. **Background Processing (SQS Worker)**:
+   - An SQS event triggers the `youtube-summarizer` Lambda worker.
+   - The worker fetches the transcript, communicates with the OpenAI API, stores raw transcripts in a private S3 cache bucket, caches global results in `youtube-summaries`, and updates the job status (`COMPLETED` or `FAILED`) in DynamoDB.
+
+3. **Status Polling (`GET /jobs/{job_id}`)**:
+   - The frontend enters a polling interval (every 2.5 seconds) calling the `get-summarization-job` Lambda.
+   - Once status returns `COMPLETED`, the polling clears, and the markdown summary and video title are rendered instantly.
 
 ```
 [ User Browser (Amplify Auth) ]
@@ -21,41 +34,54 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 [ CloudFront CDN ] ──► [ S3 Bucket (Vite + React + TS Static Build) ]
        │
        ▼ (REST API Call + JWT Bearer Token)
-[ AWS API Gateway ] (/summarize & /history with Cognito Authorizer)
+[ AWS API Gateway ] (/summarize, /jobs/{job_id}, & /history with Cognito Authorizer)
        │
-       ├──► [ AWS Lambda: youtube-summarizer (Python 3.13) ]
-       │           ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
-       │           ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
-       │           ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
-       │           ├──► [ S3: transcripts ]     (Fire-and-Forget Raw Storage)
-       │           ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
-       │           └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
+       ├──► [ AWS Lambda: summarization-job-producer (POST /summarize) ]
+       │           └──► [ Amazon SQS Queue ] ──► [ AWS Lambda: youtube-summarizer (Worker) ]
+       │                       ├──► [ SSM Parameter Store ] (Fetches OpenAI API Key)
+       │                       ├──► [ DynamoDB: summaries ] (Read/Write Global Cache)
+       │                       ├──► [ DynamoDB: jobs ]      (Task State Tracking)
+       │                       ├──► [ DynamoDB: users ]     (Write Ownership Mapping)
+       │                       ├──► [ S3: transcripts ]     (Fire-and-Forget Raw Storage)
+       │                       ├──► [ Residential Proxy ]   (Bypasses YouTube IP Blocks) ──► [ YouTube API ]
+       │                       └──► [ OpenAI API ]          (GPT-4o-mini Summarization)
        │
-       └──► [ AWS Lambda: get-history (Python 3.13) ]
-                   ├──► [ DynamoDB: users ]     (Read Ownership Mapping)
-                   └──► [ DynamoDB: summaries ] (Read Cached Summaries)
+       ├──► [ AWS Lambda: get-summarization-job (GET /jobs/{job_id}) ]
+       │           └──► [ DynamoDB: jobs ]          (Query Task Status & Result)
+       │
+       └──► [ AWS Lambda: get-history (GET /history) ]
+       ├──► [ DynamoDB: users ]     (Read Ownership Mapping)
+       └──► [ DynamoDB: summaries ] (Read Cached Summaries)
 ```
 
 ### Tech Stack
 
-- **Frontend:** React 18, TypeScript, Vite, Tailwind CSS v4, `react-markdown`, `react-icons`, and `lucide-react`.
-- **Authentication:** Amazon Cognito User Pools mapped via the AWS Amplify v6 `@aws-amplify/ui-react` SDK.
-- **Hosting & Custom Domain:** Cloudflare DNS & WAF + Amazon CloudFront CDN (Origin Access Control) + Amazon S3 (Private Bucket) secured via an AWS Certificate Manager (ACM) SSL certificate provisioned in `us-east-1` for `youtubesummary.patrickho.dev`.
-- **API Gateway:** REST API (`POST /summarize` and `GET /history`) secured via Cognito Authorizer with CORS enabled.
-- **Compute:** AWS Lambda running Python 3.13 (`x86_64` Amazon Linux runtime).
-- **Database & Secrets:** AWS DynamoDB (`youtube-summaries` & `user-submissions` tables), Amazon S3 (`youtube-transcripts-cache-<env>` for raw transcripts), and AWS SSM Parameter Store (`/youtube-summarizer/openai-api-key`).
-- **External Integrations:** `youtube-transcript-api` (v1.0.0+) with `GenericProxyConfig`, OpenAI API (`gpt-4o-mini`), DataImpulse Residential Proxy.
+- **Frontend Hosting:** Amazon S3 (private bucket with Origin Access Control) distributed globally via **Amazon CloudFront**.
+- **Authentication:** Amazon Cognito User Pools (SPA configuration without client secret) providing secure JWT tokens.
+- **API Gateway REST API:**
+  - Protected by a Cognito User Pool Authorizer.
+  - Stage variables (`envAlias`) dynamically route requests to either `dev` or `prod` Lambda aliases.
+  - Endpoints:
+    - `POST /summarize` (Producer)
+    - `GET /jobs/{job_id}` (Polling status check)
+    - `GET /history` (Saved user summaries library)
+- **DynamoDB Tables:**
+  - `summarization-jobs`: Tracks asynchronous task lifecycle (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`), results, and error messages.
+  - `youtube-summaries`: Global cache for video summaries to minimize redundant LLM costs.
+  - `user-submissions`: Mapping table enforcing user ownership and library pagination.
 
 ---
 
 ## ✨ Features
 
+- **Asynchronous Task Architecture:** Offloads long-running transcript fetching and LLM calls to background SQS workers, ensuring immediate `202 Accepted` responses and zero API Gateway timeout errors.
+- **Real-Time Frontend Polling:** Features a state machine in the React client that polls job progress and transitions smoothly through loading, completion, or failure states.
 - **Progressive Engagement:** Employs "lazy registration" by allowing unauthenticated users to view the landing page and enter a URL. The system intercepts the submission and presents a styled auth modal only when an action is attempted.
 - **Secure API & Content Tracking:** Blocks unauthorized backend requests at the edge via API Gateway. Maps individual `user_id` to `video_id` submissions in DynamoDB, ensuring content visibility boundaries and enabling user history lookups.
 - **Beautiful Markdown Rendering:** Transforms LLM bullet points and headers into formatted HTML using `react-markdown`.
 - **Cache Hit Indicator:** Real-time visual badge highlighting whether a summary was newly **Generated** via OpenAI or loaded instantly from the **Cached** DynamoDB store.
 - **Cost-Optimized Caching:** Prevents duplicate LLM and proxy API costs by verifying cached video IDs in DynamoDB prior to execution.
-- **Raw Data Retention:** Asynchronously archives raw JSON transcripts into an S3 bucket immediately after fetching. This bypasses DynamoDB's 400KB item limit for long podcasts and creates a permanent data asset for future features (like "Chat with Video") without incurring additional proxy costs.
+- **Raw Data Retention:** Asynchronously archives raw JSON transcripts into an S3 bucket immediately after fetching. This bypasses DynamoDB's 400KB item limit for long podcasts and creates a permanent data asset for future features without incurring additional proxy costs.
 - **Error & Retry Handling:** Displays inline error states and provides a **Retry Request** trigger when video transcripts fail or API limits are exceeded.
 - **Email Sharing Action:** Allows users to export video takeaways directly to their default mail client via a single click.
 - **YouTube Cloud IP Bypass:** Bypasses AWS datacenter IP restrictions imposed by YouTube using residential proxy routing.
@@ -67,30 +93,24 @@ An end-to-end, serverless web application that accepts a YouTube URL, extracts i
 
 ```
 SUMMARIZE-YOUTUBE/
-├── backend/                  # Isolated Python Lambda Service
-│   ├── summarize/            # youtube-summarizer Lambda
-│   │   ├── src/              # Lambda handler & business logic
-│   │   ├── tests/            # Unit & integration tests
+├── backend/                  # Isolated Python Lambda Services
+│   ├── producer/             # summarization-job-producer Lambda (POST /summarize)
+│   │   ├── src/              # lambda_function.py
+│   │   └── requirements.txt  # boto3
+│   ├── summarizer/           # youtube-summarizer SQS Worker Lambda
+│   │   ├── src/              # lambda_function.py (OpenAI & transcript processing)
 │   │   ├── build.sh          # Cross-platform Linux packaging script
-│   │   ├── requirements.txt  # Production dependencies
-│   │   └── requirements-dev.txt  # Development dependencies
-│   └── get_history/          # get-history Lambda
-│       ├── src/              # lambda_function.py
-│       ├── tests/            # Pytest unit tests
-│       ├── build.sh          # Packaging script (no native deps)
-│       └── requirements.txt  # Production dependencies (boto3)
-├── frontend/                 # Vite + React + TypeScript App
-│   ├── .env.local            # Local development config variables
-│   ├── src/
-│   │   ├── components/       # UrlForm.tsx, SummaryViewer.tsx, AuthModal.tsx
-│   │   ├── hooks/            # Custom fetch & auth state hook (useSummarize.ts)
-│   │   ├── services/         # Token handling module (auth.ts)
-│   │   ├── types/            # TypeScript interface declarations
-│   │   ├── App.tsx           # Main application layout
-│   │   └── main.tsx
+│   │   └── requirements.txt  # openai, youtube-transcript-api, boto3
+│   ├── get_job/              # get-summarization-job Lambda (GET /jobs/{job_id})
+│   │   ├── src/              # lambda_function.py
+│   │   └── requirements.txt  # boto3
+│   └── get_history/          # get-history Lambda (GET /history)
+│       └── src/              # lambda_function.py
+├── frontend/                 # Vite + React + TypeScript Frontend
+│   ├── src/                  # Components, hooks, services, and types
 │   ├── package.json
 │   └── vite.config.ts
-├── deploy-frontend.sh        # S3 Sync & CloudFront Invalidation automation
+├── deploy-frontend.sh        # S3 sync & CloudFront cache invalidation script
 ├── CONTEXT.md                # Infrastructure state and troubleshooting history
 └── README.md                 # Project documentation
 ```
@@ -112,11 +132,11 @@ SUMMARIZE-YOUTUBE/
 | Variable Key     | Description                                        | Default / Example Value                       |
 | :--------------- | :------------------------------------------------- | :-------------------------------------------- |
 | `PROXY_URL`      | Residential proxy gateway URL for YouTube requests | `http://USER:PASS@gw.dataimpulse.com:823`     |
-| `DYNAMODB_TABLE` | DynamoDB table name for cached summaries           | `youtube-summaries`                           |
+| `YOUTUBE_SUMMARIES_TABLE` | DynamoDB table name for cached summaries  | `youtube-summaries`                           |
+| `SUMMARIZATION_JOBS_TABLE` | DynamoDB table name tracking async task state and results | `summarization-jobs` |
 | `SSM_PARAM_NAME` | Parameter Store path for the OpenAI API Key        | `/youtube-summarizer/openai-api-key` |
 | `USER_SUBMISSIONS_TABLE` | Mapping table for user authentication limits | `user-submissions` |
 | `TRANSCRIPT_BUCKET` | S3 bucket name for caching raw transcript data | `youtube-transcripts-cache-prod` |
-| `YOUTUBE_SUMMARIES_TABLE` | DynamoDB table name for cached summaries (get-history) | `youtube-summaries` |
 | `CORS_ALLOW_ORIGIN` | Allowed origin for CORS headers (get-history) | `*` |
 
 ---
