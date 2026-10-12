@@ -237,7 +237,8 @@ def update_job_status(job_id, status, result_payload=None, error_message=None):
             ":u": datetime.now(timezone.utc).isoformat(),
         }
         if result_payload is not None:
-            update_expr += ", result = :r"
+            update_expr += ", #res = :r"
+            expr_names["#res"] = "result"
             expr_values[":r"] = result_payload
         if error_message is not None:
             update_expr += ", error_message = :e"
