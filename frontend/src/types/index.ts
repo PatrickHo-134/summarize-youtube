@@ -26,3 +26,29 @@ export interface HistoryPage {
   items: HistoryItem[];
   next_token: string | null;
 }
+
+export type JobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+
+export interface JobResult {
+  video_id: string;
+  title?: string;
+  summary: string;
+}
+
+export interface SubmitJobResponse {
+  job_id?: string;
+  status: JobStatus;
+  cached?: boolean;
+  data?: JobResult;
+}
+
+export interface JobRecord {
+  job_id: string;
+  video_id: string;
+  user_id: string;
+  status: JobStatus;
+  result?: JobResult;
+  error_message?: string;
+  created_at?: string;
+  updated_at?: string;
+}
