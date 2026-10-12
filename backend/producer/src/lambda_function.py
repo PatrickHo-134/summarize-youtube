@@ -2,6 +2,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
+from src import config
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -47,15 +48,7 @@ def lambda_handler(event, context):
     if not video_id:
         return response(400, {"error": "Missing video_id"})
 
-    summarization_jobs_table_name = os.environ.get(
-        "SUMMARIZATION_JOBS_TABLE", "summarization-jobs"
-    )
-    youtube_summaries_table_name = os.environ.get(
-        "YOUTUBE_SUMMARIES_TABLE", "youtube-summaries"
-    )
-    sqs_queue_url = os.environ.get("SQS_QUEUE_URL")
-
-    summaries_table = dynamodb.Table(youtube_summaries_table_name)
+    summaries_table = dynamodb.Table(config.YOUTUBE_SUMMARIES_TABLE)
     cached = summaries_table.get_item(Key={"video_id": video_id})
     if "Item" in cached:
         return response(
@@ -66,7 +59,7 @@ def lambda_handler(event, context):
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
 
-    jobs_table = dynamodb.Table(summarization_jobs_table_name)
+    jobs_table = dynamodb.Table(config.SUMMARIZATION_JOBS_TABLE)
     jobs_table.put_item(
         Item={
             "job_id": job_id,
@@ -79,7 +72,7 @@ def lambda_handler(event, context):
     )
 
     sqs.send_message(
-        QueueUrl=sqs_queue_url,
+        QueueUrl=config.SQS_QUEUE_URL,
         MessageBody=json.dumps(
             {"job_id": job_id, "video_id": video_id, "user_id": user_id}
         ),
