@@ -212,6 +212,10 @@ backend/get_history/package/
 backend/get_history/deployment.zip
 backend/summarize/package/
 backend/summarize/deployment.zip
+backend/job_status/package/
+backend/job_status/deployment.zip
+backend/producer/package/
+backend/producer/deployment.zip
 backend/package/
 
 # Frontend

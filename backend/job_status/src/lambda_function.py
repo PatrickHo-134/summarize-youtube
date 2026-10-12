@@ -1,3 +1,4 @@
+from src import config
 import os
 import json
 import logging
@@ -11,15 +12,6 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-SUMMARIZATION_JOBS_TABLE = os.environ.get('SUMMARIZATION_JOBS_TABLE', 'summarization-jobs')
-
-CORS_HEADERS = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Access-Control-Allow-Methods': 'OPTIONS,GET',
-}
-
-
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Decimal):
@@ -30,7 +22,7 @@ class DecimalEncoder(json.JSONEncoder):
 def response(status_code: int, body: dict) -> dict:
     return {
         'statusCode': status_code,
-        'headers': CORS_HEADERS,
+        'headers': config.CORS_HEADERS,
         'body': json.dumps(body, cls=DecimalEncoder),
     }
 
@@ -45,7 +37,7 @@ def extract_user_id(event: dict) -> str | None:
 
 
 def get_job(job_id: str) -> dict | None:
-    table = dynamodb.Table(SUMMARIZATION_JOBS_TABLE)
+    table = dynamodb.Table(config.SUMMARIZATION_JOBS_TABLE)
     try:
         result = table.get_item(Key={'job_id': job_id})
         return result.get('Item')
@@ -56,7 +48,7 @@ def get_job(job_id: str) -> dict | None:
 
 def lambda_handler(event: dict, context) -> dict:
     if event.get('httpMethod') == 'OPTIONS':
-        return {'statusCode': 200, 'headers': CORS_HEADERS, 'body': ''}
+        return {'statusCode': 200, 'headers': config.CORS_HEADERS, 'body': ''}
 
     user_id = extract_user_id(event)
     if not user_id:
