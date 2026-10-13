@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Link, ArrowRight, Loader2 } from "lucide-react";
+import React, { useRef, useState } from "react";
+import { Link, ArrowRight, Loader2, X } from "lucide-react";
 
 interface UrlFormProps {
   onSubmit: (url: string) => void;
@@ -8,12 +8,18 @@ interface UrlFormProps {
 
 export const UrlForm: React.FC<UrlFormProps> = ({ onSubmit, isLoading }) => {
   const [url, setUrl] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (url.trim()) {
       onSubmit(url);
     }
+  };
+
+  const handleClear = () => {
+    setUrl("");
+    inputRef.current?.focus();
   };
 
   return (
@@ -37,6 +43,7 @@ export const UrlForm: React.FC<UrlFormProps> = ({ onSubmit, isLoading }) => {
             <Link className="w-4 h-4" />
           </div>
           <input
+            ref={inputRef}
             type="text"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -44,6 +51,17 @@ export const UrlForm: React.FC<UrlFormProps> = ({ onSubmit, isLoading }) => {
             disabled={isLoading}
             className="flex-1 bg-transparent text-gray-900 text-sm outline-none placeholder-gray-400 disabled:opacity-60 min-w-0"
           />
+          {url.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClear}
+              disabled={isLoading}
+              aria-label="Clear URL"
+              className="flex-shrink-0 text-gray-400 hover:text-gray-600 disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
           <button
             type="submit"
             disabled={isLoading || !url.trim()}
