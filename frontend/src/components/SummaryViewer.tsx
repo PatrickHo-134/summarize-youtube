@@ -19,7 +19,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
         <h2 className="text-base font-semibold text-slate-900">
           {title || "Video Insights"}
         </h2>
-        {source && (
+        {/* {source && (
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
             {source === "cache" ? (
               <>
@@ -32,7 +32,7 @@ export const SummaryViewer: React.FC<SummaryViewerProps> = ({
               </>
             )}
           </span>
-        )}
+        )} */}
       </div>
 
       <RenderMarkdown content={summary} />
