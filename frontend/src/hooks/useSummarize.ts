@@ -1,7 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import type { SummarizeResponse } from '../types';
-import { getAuthToken } from '../services/auth';
-import { submitSummarizationJob, checkJobStatus, extractVideoId, ApiRequestError } from '../services/api';
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { SummarizeResponse } from "../types";
+import { getAuthToken } from "../services/auth";
+import {
+  submitSummarizationJob,
+  checkJobStatus,
+  extractVideoId,
+  sanitizeErrorMessage,
+  ApiRequestError,
+} from "../services/api";
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -50,21 +56,24 @@ export function useSummarize() {
 
         const job = await checkJobStatus(jobId, token);
 
-        if (job.status === 'COMPLETED') {
+        if (job.status === "COMPLETED") {
           stopPolling();
           setData({
-            summary: job.result?.summary ?? '',
+            summary: job.result?.summary ?? "",
             title: job.result?.title,
-            source: 'llm',
+            source: "llm",
           });
           setLoading(false);
-        } else if (job.status === 'FAILED') {
+        } else if (job.status === "FAILED") {
           stopPolling();
-          setError(job.error_message ?? 'Summarization failed. Please try again.');
+          setError(sanitizeErrorMessage(job.error_message));
           setLoading(false);
         }
       } catch (err) {
-        if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {
+        if (
+          err instanceof ApiRequestError &&
+          (err.status === 401 || err.status === 403)
+        ) {
           stopPolling();
           setSessionExpired(true);
           setLoading(false);
@@ -97,7 +106,7 @@ export function useSummarize() {
 
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
-      setError('Please enter a valid YouTube URL.');
+      setError("Please enter a valid YouTube URL.");
       setLoading(false);
       return;
     }
@@ -112,11 +121,11 @@ export function useSummarize() {
     try {
       const response = await submitSummarizationJob(videoId, token);
 
-      if (response.status === 'COMPLETED') {
+      if (response.status === "COMPLETED") {
         setData({
-          summary: response.data?.summary ?? '',
+          summary: response.data?.summary ?? "",
           title: response.data?.title,
-          source: response.cached ? 'cache' : 'llm',
+          source: response.cached ? "cache" : "llm",
         });
         setLoading(false);
         return;
@@ -125,16 +134,19 @@ export function useSummarize() {
       if (response.job_id) {
         startPolling(response.job_id);
       } else {
-        setError('Unexpected response from server.');
+        setError("Unexpected response from server.");
         setLoading(false);
       }
     } catch (err) {
-      if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {
+      if (
+        err instanceof ApiRequestError &&
+        (err.status === 401 || err.status === 403)
+      ) {
         setSessionExpired(true);
       } else if (err instanceof ApiRequestError) {
-        setError(err.message);
+        setError(sanitizeErrorMessage(err.message));
       } else {
-        setError('Network Error: Unable to reach the API endpoint.');
+        setError("Network Error: Unable to reach the API endpoint.");
       }
       setLoading(false);
     }
