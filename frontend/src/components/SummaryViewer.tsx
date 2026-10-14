@@ -1,5 +1,5 @@
 import React from "react";
-import { Database, Cpu } from "lucide-react";
+// import { Database, Cpu } from "lucide-react";
 import { RenderMarkdown } from "./RenderMarkdown";
 
 interface SummaryViewerProps {
@@ -10,7 +10,7 @@ interface SummaryViewerProps {
 
 export const SummaryViewer: React.FC<SummaryViewerProps> = ({
   summary,
-  source,
+  // source,
   title,
 }) => {
   return (
