@@ -138,6 +138,9 @@ SUMMARIZE-YOUTUBE/
 | `USER_SUBMISSIONS_TABLE` | Mapping table for user authentication limits | `user-submissions` |
 | `TRANSCRIPT_BUCKET` | S3 bucket name for caching raw transcript data | `youtube-transcripts-cache-prod` |
 | `CORS_ALLOW_ORIGIN` | Allowed origin for CORS headers (get-history) | `*` |
+| `SQS_QUEUE_URL` | SQS queue URL used by the producer Lambda in **prod** | `https://sqs.ap-southeast-2.amazonaws.com/.../queue-prod` |
+| `SQS_QUEUE_URL_DEV` | SQS queue URL used by the producer Lambda in **dev** | `https://sqs.ap-southeast-2.amazonaws.com/.../queue-dev` |
+| `ENVIRONMENT` | Deployment environment for the producer Lambda; controls which SQS URL is used | `dev` or `prod` |
 
 ---
 
@@ -201,9 +204,7 @@ backend/venv/bin/python -m pytest backend/job_status/tests/test_lambda_function.
 
 ### 3\. Backend Lambda Build & Deployment
 
-#### Package for AWS Lambda
-
-Run the cross-platform packaging script inside the `backend/` directory:
+#### Package `summarize` for AWS Lambda
 
 ```Bash
 cd backend/summarize
@@ -223,9 +224,33 @@ chmod +x build.sh
 
 Pure-Python; no cross-compilation needed. Bundles `src/` into `deployment.zip`.
 
+#### Package `producer` for AWS Lambda
+
+Before building, ensure the correct `SQS_QUEUE_URL` environment variable is set on the target Lambda function in AWS:
+
+- **dev:** the Lambda's `ENVIRONMENT` variable must be `dev` and `SQS_QUEUE_URL_DEV` must point to the dev SQS queue.
+- **prod:** the Lambda's `ENVIRONMENT` variable must be `prod` and `SQS_QUEUE_URL` must point to the prod SQS queue.
+
+Then run the build script with the target environment:
+
+```bash
+cd backend/producer
+chmod +x build.sh
+
+# For dev (default)
+./build.sh
+# or explicitly:
+./build.sh dev
+
+# For prod
+./build.sh prod
+```
+
+This produces `deployment-dev.zip` or `deployment-prod.zip` respectively. Upload the appropriate zip to the producer Lambda function via the AWS Lambda Console or AWS CLI.
+
 #### Deploy Zip to Lambda
 
-Upload the generated `deployment.zip` to the appropriate Lambda function (`youtube-summarizer` or `get-history`) via the AWS Lambda Console or AWS CLI.
+Upload the generated zip file to the appropriate Lambda function (`youtube-summarizer`, `producer`, or `get-history`) via the AWS Lambda Console or AWS CLI.
 
 ## 🔍 Troubleshooting & Lessons Learned
 
