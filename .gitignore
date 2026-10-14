@@ -216,6 +216,8 @@ backend/job_status/package/
 backend/job_status/deployment.zip
 backend/producer/package/
 backend/producer/deployment.zip
+backend/producer/deployment-dev.zip
+backend/producer/deployment-prod.zip
 backend/package/
 
 # Frontend
