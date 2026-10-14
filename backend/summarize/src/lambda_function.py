@@ -70,7 +70,9 @@ def format_prompt_v2(content):
     return f"""
             I'm sharing a transcript for my personal learning.
             Please extract and summarize all the key insights and takeaways to help me quickly understand the most important information.
-            Present the output as clear bullet points, grouped logically by theme or topic. This is the transcript:
+            Present the output as clear bullet points, grouped logically by theme or topic.
+            Respond in the same language as the transcript.
+            This is the transcript:
             {content}
             """
 
@@ -102,22 +104,29 @@ def get_transcript(video_id):
             else:
                 ytt_api = YouTubeTranscriptApi()
 
-            fetched_transcript = ytt_api.fetch(video_id)
+            available = ytt_api.list(video_id)
+            try:
+                transcript = available.find_transcript(['vi', 'en'])
+            except NoTranscriptFound:
+                transcript = available.find_generated_transcript(['vi', 'en'])
+            language_code = transcript.language_code
+            logger.info(f"Selected transcript language: {language_code}")
+            fetched_transcript = transcript.fetch()
             transcript_list = fetched_transcript.to_raw_data()
             full_content = " ".join(snippet['text'] for snippet in transcript_list)
-            return full_content, transcript_list, None, None
+            return full_content, transcript_list, language_code, None, None
 
         except VideoUnavailable:
-            return None, None, "This video is unavailable (deleted, private, or region-blocked).", 400
+            return None, None, None, "This video is unavailable (deleted, private, or region-blocked).", 400
         except TranscriptsDisabled:
-            return None, None, "Transcripts are disabled for this video.", 400
+            return None, None, None, "Transcripts are disabled for this video.", 400
         except NoTranscriptFound:
-            return None, None, "No transcript found for this video in any language.", 400
+            return None, None, None, "No transcript found for this video in any language.", 400
         except Exception as e:
             last_error = str(e)
             logger.warning(f"Transcript fetch failed with proxy '{proxy_url}': {last_error}")
 
-    return None, None, f"All proxies exhausted. Last error: {last_error}", 429
+    return None, None, None, f"All proxies exhausted. Last error: {last_error}", 429
 
 def get_video_title(video_id: str) -> str:
     """Fetches the video title via YouTube's public oEmbed API."""
@@ -157,7 +166,7 @@ def save_to_cache(video_id, title, summary):
     except ClientError as e:
         logger.error(f"DynamoDB write error (youtube-summaries): {e.response['Error']['Message']}")
 
-def upload_transcript_to_s3(video_id, title, raw_transcript):
+def upload_transcript_to_s3(video_id, title, raw_transcript, language_code='en'):
     """Uploads the raw transcript payload to S3 without blocking the main execution."""
     if not getattr(config, 'TRANSCRIPT_BUCKET', None):
         logger.warning("TRANSCRIPT_BUCKET not configured. Skipping S3 upload.")
@@ -168,7 +177,7 @@ def upload_transcript_to_s3(video_id, title, raw_transcript):
             "video_id": video_id,
             "title": title,
             "fetched_at": datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-            "language": "en",
+            "language": language_code,
             "transcript": raw_transcript
         }
 
@@ -263,7 +272,7 @@ def _process_record(record):
     logger.info(f"Processing job_id={job_id}, video_id={video_id}, user_id={user_id}")
     update_job_status(job_id, "PROCESSING")
 
-    transcript, raw_transcript, error, _ = get_transcript(video_id)
+    transcript, raw_transcript, language_code, error, _ = get_transcript(video_id)
     if error:
         raise RuntimeError(f"Transcript fetch failed: {error}")
 
@@ -272,7 +281,7 @@ def _process_record(record):
     video_title = get_video_title(video_id)
     logger.info(f"Video Title: {video_title}")
 
-    upload_transcript_to_s3(video_id, video_title, raw_transcript)
+    upload_transcript_to_s3(video_id, video_title, raw_transcript, language_code)
 
     logger.info("Sending transcript to OpenAI...")
     summary, llm_error, _ = summarise(transcript)
