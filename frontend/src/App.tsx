@@ -88,13 +88,13 @@ export function App() {
   return (
     <div className="min-h-screen bg-slate-50 text-gray-900">
       <Navbar view={view} onViewChange={setView} userEmail={userEmail} onSignOut={handleSignOut} onLogin={handleLogin} />
-      <div className="max-w-3xl mx-auto space-y-8 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-3xl mx-auto space-y-6 sm:space-y-8 py-8 sm:py-12 px-4 sm:px-6 lg:px-8 overflow-x-hidden">
         {view === "new" && (
           <>
             <UrlForm onSubmit={handleSubmit} isLoading={loading} />
 
             {loading && (
-              <div className="p-8 text-center text-gray-500 animate-pulse bg-white border border-gray-200 rounded-2xl shadow-sm">
+              <div className="p-6 sm:p-8 text-center text-gray-500 animate-pulse bg-white border border-gray-200 rounded-2xl shadow-sm">
                 {polling
                   ? "Generating summary in the background..."
                   : "Submitting your request..."}

@@ -18,6 +18,20 @@ export function extractVideoId(youtubeUrl: string): string | null {
   return match ? match[1] : null;
 }
 
+const SENSITIVE_ERROR_PATTERNS = [
+  /proxies exhausted/i,
+  /requestblocked/i,
+];
+
+const GENERIC_ERROR_MESSAGE =
+  'We were unable to process this video right now. Please try again in a moment.';
+
+export function sanitizeErrorMessage(message?: string | null): string {
+  if (!message) return GENERIC_ERROR_MESSAGE;
+  const isSensitive = SENSITIVE_ERROR_PATTERNS.some((pattern) => pattern.test(message));
+  return isSensitive ? GENERIC_ERROR_MESSAGE : message;
+}
+
 async function parseJsonSafe(response: Response): Promise<Record<string, unknown>> {
   try {
     return await response.json();

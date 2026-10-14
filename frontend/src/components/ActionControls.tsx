@@ -24,25 +24,27 @@ export const ActionControls: React.FC<ActionControlsProps> = ({
 
   if (status === 'error') {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700 space-y-4">
-        <div className="text-sm font-medium">Error: {errorMessage}</div>
-        <button
-          onClick={onRetry}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-xl transition cursor-pointer"
-        >
-          <RefreshCw className="w-4 h-4" />
-          <span>Retry Request</span>
-        </button>
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-4 sm:p-6 text-red-700 space-y-4">
+        <div className="text-sm font-medium break-words">Error: {errorMessage}</div>
+        <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={onRetry}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 sm:py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-xl transition cursor-pointer w-full sm:w-auto"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Retry Request</span>
+          </button>
+        </div>
       </div>
     );
   }
 
   if (status === 'success') {
     return (
-      <div className="flex justify-end pt-2">
+      <div className="flex flex-col sm:flex-row sm:justify-end gap-3 pt-2">
         <button
           onClick={handleEmail}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition cursor-pointer"
+          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-xl shadow-sm transition cursor-pointer w-full sm:w-auto"
         >
           <Mail className="w-4 h-4" />
           <span>Send to Email</span>

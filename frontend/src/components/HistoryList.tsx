@@ -162,31 +162,31 @@ export const HistoryList: React.FC<HistoryListProps> = ({
           {sortedItems.map((item) => (
             <article
               key={`${item.videoId}-${item.createdAt}`}
-              className="bg-white rounded-2xl border border-slate-200/80 p-5 sm:p-6 shadow-2xs hover:shadow-xs transition-shadow"
+              className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-6 shadow-2xs hover:shadow-xs transition-shadow overflow-hidden"
             >
               <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-3 min-w-0">
                   <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 mt-0.5">
                     <Play className="w-4 h-4 fill-current" />
                   </div>
-                  <div className="space-y-0.5">
+                  <div className="space-y-0.5 min-w-0">
                     <a
                       href={item.videoUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-indigo-600 text-xs sm:text-sm font-medium hover:underline inline-flex items-center gap-1 group"
+                      className="text-indigo-600 text-xs sm:text-sm font-medium hover:underline inline-flex items-center gap-1 group break-all"
                     >
                       {item.videoUrl.replace(/^https?:\/\/(www\.)?/, "")}
-                      <ExternalLink className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <ExternalLink className="w-3 h-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                     </a>
-                    <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug">
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 leading-snug break-words">
                       {item.title || `Video Summary (${item.videoId})`}
                     </h2>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-50 border border-slate-200/60 text-slate-500 text-xs font-medium">
+                <div className="flex items-center flex-wrap gap-2 shrink-0 self-start sm:self-auto">
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl bg-slate-50 border border-slate-200/60 text-slate-500 text-xs font-medium whitespace-nowrap">
                     <Calendar className="w-3.5 h-3.5 text-slate-400" />
                     <span>{formatDate(item.createdAt)}</span>
                   </div>
